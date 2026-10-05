@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="pt-MZ">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#fcfcf8">
+    <meta name="description" content="Conversa com o Bot Nur: ajuda próxima para os teus estudos, ideias e descobertas em Moçambique.">
+    <title>Bot Nur — uma boa ideia começa aqui</title>
+    <link rel="icon" href="/nur-mark.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css?v=3">
+    <script type="module" src="/app.js?v=5"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="Menu principal">
+        <div class="sidebar-heading">
+          <a class="brand" href="/" aria-label="Bot Nur, início">
+            <img class="brand-mark" src="/nur-mark.svg" alt="">
+            <span class="brand-name">nur<span class="brand-period">.</span><span class="brand-bot">BOT</span></span>
+          </a>
+          <button class="icon-button sidebar-dismiss" id="sidebar-dismiss" type="button" aria-label="Fechar menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+
+        <button class="new-chat-button" id="new-chat" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Nova conversa</span>
+          <span class="shortcut" title="Atalho: Alt+N">N</span>
+        </button>
+
+        <div class="history-heading">
+          <span>AS TUAS CONVERSAS</span>
+          <span class="history-indicator" aria-hidden="true"></span>
+        </div>
+        <nav class="conversation-list" id="conversation-list" aria-label="Conversas anteriores"></nav>
+        <p class="history-empty" id="history-empty">As tuas conversas ficam guardadas aqui.</p>
+
+        <div class="sidebar-bottom">
+          <div class="sidebar-note">
+            <span class="note-sparkle" aria-hidden="true">✳</span>
+            <p>Um espaço teu para<br><strong>perguntar sem medo.</strong></p>
+          </div>
+          <button class="profile-button" id="profile-button" type="button" aria-label="Perfil e conta">
+            <span class="profile-avatar" id="profile-avatar">V</span>
+            <span class="profile-copy"><strong id="profile-name">Visitante</strong><small id="profile-label">A tua conta</small></span>
+            <svg class="profile-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+          <button class="settings-button" id="settings-button" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.1 1.8-1.7 2.9-2-.4a7.9 7.9 0 0 1-1.7 1l-.7 1.9h-3.3l-.7-1.9a7.9 7.9 0 0 1-1.8-1l-2 .4L5 16.9l1.1-1.8a7.8 7.8 0 0 1 0-2.1L5 11.2l1.7-2.9 2 .4a7.9 7.9 0 0 1 1.7-1l.7-1.9h3.3l.7 1.9a7.9 7.9 0 0 1 1.8 1l2-.4 1.7 2.9-1.1 1.8a7.8 7.8 0 0 1-.1 2Z"/></svg>
+            <span>Definições</span>
+          </button>
+        </div>
+      </aside>
+
+      <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
+
+      <main class="main-panel">
+        <header class="topbar">
+          <div class="topbar-start">
+            <button class="icon-button menu-button" id="menu-button" type="button" aria-label="Abrir menu">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+            </button>
+            <div class="mobile-brand" aria-label="Bot Nur">
+              <img src="/nur-mark.svg" alt="" class="mobile-mark">
+              <span>nur<span class="brand-period">.</span></span>
+            </div>
+            <div class="workspace-label">
+              <span class="workspace-name">O teu espaço</span>
+              <span class="workspace-separator">/</span>
+              <span class="workspace-current" id="workspace-title">Nova conversa</span>
+            </div>
+          </div>
+          <div class="topbar-end">
+            <span class="online-indicator"><span></span> sempre por aqui</span>
+            <button class="topbar-profile" id="topbar-profile" type="button" aria-label="Abrir o teu perfil">
+              <span id="topbar-avatar">V</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="chat-layout" aria-label="Conversa com o Bot Nur">
+          <div class="messages-scroll" id="messages-scroll">
+            <div class="welcome-view" id="welcome-view">
+              <div class="welcome-eyebrow"><span>FEITO PARA TI</span><span class="eyebrow-star">✳</span></div>
+              <h1>Uma boa ideia<br>começa com <span>uma pergunta.</span></h1>
+              <p class="welcome-description">Olá! Sou o Nur. Estou aqui para ouvir, explicar,<br class="desktop-break"> descobrir e pensar contigo. Por onde começamos?</p>
+
+              <div class="starter-grid" aria-label="Sugestões de conversa">
+                <button class="starter-card starter-study" data-prompt="Ajuda-me a perceber uma matéria que estou a estudar." type="button">
+                  <span class="starter-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M3.5 5.8A2.3 2.3 0 0 1 5.8 3.5H12v16H5.8a2.3 2.3 0 0 0-2.3 2V5.8ZM20.5 5.8a2.3 2.3 0 0 0-2.3-2.3H12v16h6.2a2.3 2.3 0 0 1 2.3 2V5.8Z"/></svg>
+                  </span>
+                  <span class="starter-copy"><strong>Aprender qualquer coisa</strong><small>Vamos por partes, ao teu ritmo.</small></span>
+                  <svg class="starter-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>
+                </button>
+                <button class="starter-card starter-ideas" data-prompt="Ajuda-me a pensar numa ideia de negócio simples para começar em Moçambique." type="button">
+                  <span class="starter-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.5.3 1 1 1 1.6v.7h4v-.7c0-.6.5-1.3 1-1.6A7 7 0 0 0 12 2Z"/></svg>
+                  </span>
+                  <span class="starter-copy"><strong>Explorar uma ideia</strong><small>Pequenos começos, grandes planos.</small></span>
+                  <svg class="starter-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>
+                </button>
+                <button class="starter-card starter-local" data-prompt="Conta-me o que sabes sobre Maxixe, em Inhambane." type="button">
+                  <span class="starter-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>
+                  </span>
+                  <span class="starter-copy"><strong>Descobrir Maxixe</strong><small>Conhecer mais de perto.</small></span>
+                  <svg class="starter-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>
+                </button>
+                <button class="starter-card starter-writing" data-prompt="Dá-me ideias para criar conteúdo interessante para as redes sociais." type="button">
+                  <span class="starter-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5Z"/></svg>
+                  </span>
+                  <span class="starter-copy"><strong>Criar alguma coisa</strong><small>Escrever, imaginar, experimentar.</small></span>
+                  <svg class="starter-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>
+                </button>
+              </div>
+
+              <div class="welcome-footnote"><span class="footnote-line"></span><span>Sem perguntas erradas. Só conversas que ajudam.</span><span class="footnote-line"></span></div>
+            </div>
+            <div class="message-list" id="message-list" role="log" aria-label="Mensagens da conversa" aria-live="polite"></div>
+          </div>
+
+          <div class="composer-area">
+            <form class="composer-form" id="composer-form">
+              <label class="visually-hidden" for="message-input">A tua mensagem para o Nur</label>
+              <textarea id="message-input" name="message" rows="1" placeholder="Escreve o que te vai na cabeça..." maxlength="4000" required></textarea>
+              <div class="composer-toolbar">
+                <span class="composer-hint"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v4l2.5 1.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg> Leva o tempo que precisares</span>
+                <div class="composer-actions">
+                  <span class="character-count" id="character-count">0 / 4000</span>
+                  <button class="send-button" id="send-button" type="submit" aria-label="Enviar mensagem" disabled>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-4 14-3-6-7-1Zm7 1 7-8"/></svg>
+                    <span>Enviar</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+            <p class="composer-disclaimer">O Nur está a aprender. Para informações importantes ou atualizadas, confirma sempre com uma fonte de confiança.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog class="dialog" id="auth-dialog" aria-labelledby="auth-title">
+      <form class="dialog-card auth-form" id="auth-form">
+        <button class="dialog-close" type="button" data-close-dialog aria-label="Fechar">&times;</button>
+        <div class="dialog-mark"><img src="/nur-mark.svg" alt=""></div>
+        <span class="dialog-eyebrow">O TEU ESPAÇO, SEMPRE CONTIGO</span>
+        <h2 id="auth-title">Volta quando quiseres.</h2>
+        <p class="dialog-description">Cria uma conta para guardar as tuas conversas em qualquer dispositivo.</p>
+        <label class="form-field hidden" id="auth-name-field">Como te chamamos?
+          <input id="auth-name" name="name" autocomplete="name" minlength="2" maxlength="50" placeholder="O teu nome">
+        </label>
+        <label class="form-field">Email
+          <input id="auth-email" name="email" type="email" autocomplete="email" maxlength="254" placeholder="tu@exemplo.com" required>
+        </label>
+        <label class="form-field">Palavra-passe
+          <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" placeholder="Pelo menos 8 caracteres" required>
+        </label>
+        <p class="form-error" id="auth-error" role="alert" hidden></p>
+        <button class="dialog-submit" id="auth-submit" type="submit">Entrar</button>
+        <p class="auth-switch"><span id="auth-switch-prompt">Ainda não tens conta?</span> <button id="auth-switch-button" type="button">Criar conta</button></p>
+        <button class="dialog-logout hidden" id="auth-logout" type="button">Terminar sessão e continuar como visitante</button>
+      </form>
+    </dialog>
+
+    <dialog class="dialog" id="settings-dialog" aria-labelledby="settings-title">
+      <section class="dialog-card settings-card">
+        <button class="dialog-close" type="button" data-close-dialog aria-label="Fechar">&times;</button>
+        <div class="dialog-mark"><img src="/nur-mark.svg" alt=""></div>
+        <span class="dialog-eyebrow">DO TEU JEITO</span>
+        <h2 id="settings-title">Definições</h2>
+        <p class="dialog-description">Gere o teu perfil, a memória que partilhaste e o teu histórico.</p>
+        <form id="profile-form" class="settings-form">
+          <label class="form-field">Nome do perfil
+            <input id="profile-name-input" name="name" autocomplete="name" minlength="2" maxlength="50" required>
+          </label>
+          <p class="settings-about" id="profile-email"></p>
+          <button class="dialog-submit" type="submit">Guardar perfil</button>
+        </form>
+        <div class="setting-row">
+          <span class="setting-copy"><strong>Aparência</strong><small id="theme-description">Modo claro</small></span>
+          <button class="theme-toggle" id="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Ativar modo escuro"><span></span></button>
+        </div>
+        <section class="memory-section" aria-labelledby="memory-title">
+          <h3 id="memory-title">Memória contextual</h3>
+          <p class="settings-about">Guarda apenas o que escolheres partilhar. O Nur seleciona trechos relevantes para cada pergunta; não guarda dados sensíveis.</p>
+          <p class="settings-about hidden" id="memory-account-note">Cria uma conta para guardar memória entre conversas.</p>
+          <label class="memory-enabled-row">
+            <input id="memory-enabled" type="checkbox">
+            <span>Permitir que o Nur use memória relevante nas respostas</span>
+          </label>
+          <form id="memory-form" class="settings-form">
+            <label class="form-field">Interesses <small>Um por linha</small>
+              <textarea id="memory-interests" data-memory-category="interests" maxlength="1200" rows="2" placeholder="Ex.: tecnologia, futebol"></textarea>
+            </label>
+            <label class="form-field">Objetivos <small>Um por linha</small>
+              <textarea id="memory-goals" data-memory-category="goals" maxlength="1200" rows="2" placeholder="Ex.: aprender programação"></textarea>
+            </label>
+            <label class="form-field">Preferências <small>Um por linha</small>
+              <textarea id="memory-preferences" data-memory-category="preferences" maxlength="1200" rows="2" placeholder="Ex.: explicações curtas, português simples"></textarea>
+            </label>
+            <label class="form-field">Assuntos favoritos <small>Um por linha</small>
+              <textarea id="memory-favorite-topics" data-memory-category="favorite_topics" maxlength="1200" rows="2" placeholder="Ex.: astronomia, história de Moçambique"></textarea>
+            </label>
+            <label class="form-field">Projetos em andamento <small>Um por linha</small>
+              <textarea id="memory-projects" data-memory-category="projects" maxlength="1200" rows="2" placeholder="Ex.: criar uma página de vendas"></textarea>
+            </label>
+            <p class="form-error" id="memory-error" role="alert" hidden></p>
+            <button class="dialog-submit" id="memory-save" type="submit">Guardar memória</button>
+          </form>
+          <button class="dialog-danger" id="memory-delete" type="button">Apagar toda a memória</button>
+        </section>
+        <section class="history-settings">
+          <h3>Histórico</h3>
+          <p class="settings-about">Apagar o histórico remove todas as conversas desta conta e as respetivas mensagens.</p>
+          <button class="dialog-danger" id="history-delete" type="button">Apagar todo o histórico</button>
+        </section>
+        <p class="settings-about">A memória é opcional. Nunca guardes palavras-passe, chaves de API, dados financeiros, de saúde ou outros dados sensíveis.</p>
+      </section>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="sr-only" id="app-status" role="status" aria-live="polite"></div>
+  </body>
+</html>

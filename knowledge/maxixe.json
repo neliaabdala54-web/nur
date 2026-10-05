@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "title": "Notas iniciais sobre Maxixe",
+  "locale": "pt-MZ",
+  "lastReviewed": "2026-10-04",
+  "sources": [
+    {
+      "id": "base-oficial-maxixe",
+      "type": "project-document",
+      "title": "Base de Dados Oficial do Bot Nur — Maxixe, Etapas 1 a 12",
+      "location": "../Base_de_Dados_Oficial_Bot_Nur_Maxixe_Etapas_1_a_12_PARTE_12.docx"
+    }
+  ],
+  "notice": "Este ficheiro é o ponto de partida da base de conhecimento local. Não invente horários, contactos, preços nem recomendações de estabelecimentos. Confirme informações práticas e recentes com fontes locais ou pesquisa web antes de as apresentar como atuais.",
+  "facts": [
+    {
+      "id": "MAX-001",
+      "topic": "Localização",
+      "text": "Maxixe é uma cidade e município da província de Inhambane, no sul de Moçambique, junto à baía de Inhambane.",
+      "confidence": "medium",
+      "sourceIds": []
+    },
+    {
+      "id": "MAX-002",
+      "topic": "Visita e serviços",
+      "text": "A disponibilidade de transportes, horários, preços e serviços locais pode mudar. Confirme esses detalhes junto dos operadores ou estabelecimentos antes de viajar.",
+      "confidence": "high",
+      "sourceIds": []
+    },
+    {
+      "id": "INH-675",
+      "topic": "Organização territorial",
+      "text": "A Cidade de Inhambane e a Cidade de Maxixe possuem administração municipal própria e não devem ser tratadas como bairros uma da outra.",
+      "confidence": "high",
+      "sourceIds": ["base-oficial-maxixe"]
+    },
+    {
+      "id": "INH-744",
+      "topic": "Comércio local",
+      "text": "Maxixe é um centro comercial urbano próprio, distinto da Cidade de Inhambane.",
+      "confidence": "high",
+      "sourceIds": ["base-oficial-maxixe"]
+    }
+  ]
+}

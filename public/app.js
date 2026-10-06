@@ -12,6 +12,8 @@ const elements = {
   authSubmit: $("#auth-submit"),
   authSwitchButton: $("#auth-switch-button"),
   authSwitchPrompt: $("#auth-switch-prompt"),
+  apiBaseForm: $("#api-base-form"),
+  apiBaseInput: $("#api-base-input"),
   appStatus: $("#app-status"),
   attachmentButton: $("#attachment-button"),
   attachmentInput: $("#attachment-input"),
@@ -332,11 +334,25 @@ function showToast(message) {
   toastTimer = setTimeout(() => elements.toast.classList.remove("visible"), 3600);
 }
 
+const getApiBase = () => {
+  if (typeof window !== "undefined" && window.BOT_NUR_API_BASE) {
+    return window.BOT_NUR_API_BASE.replace(/\/+$/, "");
+  }
+  try {
+    const stored = localStorage.getItem("bot_nur_api_base");
+    if (stored) return stored.trim().replace(/\/+$/, "");
+  } catch {}
+  return "";
+};
+
 async function api(path, options = {}) {
   const headers = new Headers(options.headers);
   if (options.body) headers.set("Content-Type", "application/json");
-  const response = await fetch(path, {
-    credentials: "same-origin",
+  const apiBase = getApiBase();
+  const fullUrl = apiBase && path.startsWith("/") ? `${apiBase}${path}` : path;
+  const isCrossOrigin = Boolean(apiBase) && !apiBase.startsWith(window.location.origin);
+  const response = await fetch(fullUrl, {
+    credentials: isCrossOrigin ? "include" : "same-origin",
     ...options,
     headers,
   });
@@ -375,7 +391,7 @@ function addMessage({ role, content, createdAt, isError = false, typing = false 
     const mark = document.createElement("span");
     mark.className = "message-assistant-mark";
     const image = document.createElement("img");
-    image.src = "/nur-mark.svg";
+    image.src = "./nur-mark.svg";
     image.alt = "";
     mark.append(image);
     const dots = document.createElement("span");
@@ -388,7 +404,7 @@ function addMessage({ role, content, createdAt, isError = false, typing = false 
       const mark = document.createElement("span");
       mark.className = "message-assistant-mark";
       const image = document.createElement("img");
-      image.src = "/nur-mark.svg";
+      image.src = "./nur-mark.svg";
       image.alt = "";
       mark.append(image);
       message.append(mark);
@@ -701,6 +717,7 @@ function renderMemory(items) {
 async function openSettings() {
   elements.profileNameInput.value = currentUser?.name || "";
   elements.profileEmail.textContent = currentUser?.email || "Modo visitante";
+  elements.apiBaseInput.value = getApiBase();
   const hasAccount = Boolean(currentUser?.email);
   elements.memoryAccountNote.classList.toggle("hidden", hasAccount);
   elements.memoryForm.querySelectorAll("textarea, button").forEach((field) => {
@@ -748,7 +765,7 @@ async function initialize() {
       await openConversation(conversations[0].id, conversations[0].title);
     }
   } catch (error) {
-    showToast(`Não foi possível ligar à aplicação. ${error.message}`);
+    showToast(`Servidor backend inacessível. Podes configurar o URL do servidor nas Definições.`);
     elements.appStatus.textContent = "Não foi possível iniciar uma sessão.";
   }
 }
@@ -884,6 +901,25 @@ elements.profileForm.addEventListener("submit", async (event) => {
   } catch (error) {
     showToast(error.message);
   }
+});
+
+elements.apiBaseForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const value = elements.apiBaseInput.value.trim().replace(/\/+$/, "");
+  if (value) {
+    try {
+      new URL(value);
+      localStorage.setItem("bot_nur_api_base", value);
+      showToast("URL do servidor backend guardado.");
+    } catch {
+      showToast("Insere um URL válido (ex.: https://bot-nur.onrender.com).");
+      return;
+    }
+  } else {
+    localStorage.removeItem("bot_nur_api_base");
+    showToast("URL do servidor reposto para o mesmo domínio.");
+  }
+  initialize();
 });
 
 elements.memoryEnabled.addEventListener("change", async () => {

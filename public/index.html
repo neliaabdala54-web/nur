@@ -6,16 +6,16 @@
     <meta name="theme-color" content="#fcfcf8">
     <meta name="description" content="Conversa com o Bot Nur: ajuda próxima para os teus estudos, ideias e descobertas em Moçambique.">
     <title>Bot Nur — uma boa ideia começa aqui</title>
-    <link rel="icon" href="/nur-mark.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/styles.css?v=5">
-    <script type="module" src="/app.js?v=7"></script>
+    <link rel="icon" href="./nur-mark.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./styles.css?v=5">
+    <script type="module" src="./app.js?v=7"></script>
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar" id="sidebar" aria-label="Menu principal">
         <div class="sidebar-heading">
-          <a class="brand" href="/" aria-label="Bot Nur, início">
-            <img class="brand-mark" src="/nur-mark.svg" alt="">
+          <a class="brand" href="./" aria-label="Bot Nur, início">
+            <img class="brand-mark" src="./nur-mark.svg" alt="">
             <span class="brand-name">nur<span class="brand-period">.</span><span class="brand-bot">BOT</span></span>
           </a>
           <button class="icon-button sidebar-dismiss" id="sidebar-dismiss" type="button" aria-label="Fechar menu">
@@ -62,7 +62,7 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
             </button>
             <div class="mobile-brand" aria-label="Bot Nur">
-              <img src="/nur-mark.svg" alt="" class="mobile-mark">
+              <img src="./nur-mark.svg" alt="" class="mobile-mark">
               <span>nur<span class="brand-period">.</span></span>
             </div>
             <div class="workspace-label">
@@ -167,7 +167,7 @@
     <dialog class="dialog" id="auth-dialog" aria-labelledby="auth-title">
       <form class="dialog-card auth-form" id="auth-form">
         <button class="dialog-close" type="button" data-close-dialog aria-label="Fechar">&times;</button>
-        <div class="dialog-mark"><img src="/nur-mark.svg" alt=""></div>
+        <div class="dialog-mark"><img src="./nur-mark.svg" alt=""></div>
         <span class="dialog-eyebrow">O TEU ESPAÇO, SEMPRE CONTIGO</span>
         <h2 id="auth-title">Volta quando quiseres.</h2>
         <p class="dialog-description">Cria uma conta para guardar as tuas conversas em qualquer dispositivo.</p>
@@ -190,7 +190,7 @@
     <dialog class="dialog" id="settings-dialog" aria-labelledby="settings-title">
       <section class="dialog-card settings-card">
         <button class="dialog-close" type="button" data-close-dialog aria-label="Fechar">&times;</button>
-        <div class="dialog-mark"><img src="/nur-mark.svg" alt=""></div>
+        <div class="dialog-mark"><img src="./nur-mark.svg" alt=""></div>
         <span class="dialog-eyebrow">DO TEU JEITO</span>
         <h2 id="settings-title">Definições</h2>
         <p class="dialog-description">Gere o teu perfil, a memória que partilhaste e o teu histórico.</p>
@@ -238,6 +238,16 @@
           <h3>Histórico</h3>
           <p class="settings-about">Apagar o histórico remove todas as conversas desta conta e as respetivas mensagens.</p>
           <button class="dialog-danger" id="history-delete" type="button">Apagar todo o histórico</button>
+        </section>
+        <section class="api-settings">
+          <h3>Servidor da API</h3>
+          <p class="settings-about">Endereço do servidor backend (por omissão usa o mesmo servidor onde a página está alojada).</p>
+          <form id="api-base-form" class="settings-form">
+            <label class="form-field">URL do Servidor Backend
+              <input id="api-base-input" name="apiBase" type="url" placeholder="Ex.: https://bot-nur.onrender.com">
+            </label>
+            <button class="dialog-submit" type="submit">Guardar servidor</button>
+          </form>
         </section>
         <p class="settings-about">A memória é opcional. Nunca guardes palavras-passe, chaves de API, dados financeiros, de saúde ou outros dados sensíveis.</p>
       </section>

@@ -40,7 +40,30 @@ antigas.
 Não é necessária `SEARCH_API_KEY`: as perguntas atuais usam Google Search
 Grounding através da mesma integração Gemini.
 
-## 4. Preservar utilizadores e histórico
+## 4. Anexos e multimodalidade
+
+O backend envia conteúdo compatível diretamente ao `generateContent` da Gemini,
+sem guardar os bytes enviados e sem usar a Files API. O compositor aceita até
+três anexos por mensagem (12 MB no total): JPG/JPEG, PNG, WEBP, MP4, WEBM,
+MP3, WAV, OGG, AAC, FLAC, PDF, TXT e CSV. Cada ficheiro é validado no servidor.
+Vídeos são limitados a 2 minutos no navegador; gravações de áudio a 60 segundos.
+O servidor limita cada sessão a 8 mensagens por minuto e a 4 análises
+multimodais simultâneas por instância (limites em memória, não distribuídos).
+Os anexos originais não ficam no histórico; são guardados apenas a mensagem, os
+nomes dos ficheiros e a resposta do Nur. O microfone precisa de HTTPS e
+permissão; a leitura da resposta usa a voz disponível no navegador.
+
+DOC/DOCX e XLS/XLSX não estão implementados. A utilização multimodal e o Google
+Search Grounding estão sujeitos à disponibilidade do modelo, quota, região e
+condições do Free Tier/conta. O modelo padrão é `gemini-3.1-flash-lite`; não
+assumas que todos os tipos de entrada ou a pesquisa estão disponíveis em
+qualquer conta gratuita. Confirma os limites atuais na documentação oficial da
+[Gemini API](https://ai.google.dev/gemini-api/docs) e nos preços da conta.
+O Google Search Grounding pode requerer quota ou acesso pago, separado da
+geração de texto; verifica essa condição antes de usar perguntas atuais em
+produção.
+
+## 5. Preservar utilizadores e histórico
 
 O Bot Nur guarda contas, sessões, conversas, mensagens e memória em
 `bot-nur.sqlite`. O sistema cria o esquema se ainda não existir e reutiliza a
@@ -59,14 +82,14 @@ reinicialização ou novo deploy pode apagar contas, sessões e histórico. O SQ
 partilhando este ficheiro. Uma configuração multi-instância exige uma base de
 dados de servidor e uma migração planeada, que este projeto ainda não implementa.
 
-## 5. Fazer deploy e acompanhar
+## 6. Fazer deploy e acompanhar
 
 Guarda as variáveis, cria o serviço e acompanha o primeiro deploy em **Events**.
 Em **Logs**, verifica a instalação e a linha de arranque do servidor. Os logs não
 devem conter valores de variáveis secretas; se detetares uma credencial, revoga-a
 no fornecedor e substitui-a no Render.
 
-## 6. Testar a publicação
+## 7. Testar a publicação
 
 Depois de o deploy ficar disponível:
 
@@ -81,6 +104,9 @@ Depois de o deploy ficar disponível:
    conseguiu confirmar.
 6. Cria uma conta e uma conversa, reinicia o serviço e confirma que os dados
    continuam disponíveis quando o Persistent Disk está montado.
+7. Em HTTPS, testa uma imagem pequena, um PDF curto e uma gravação breve de
+   áudio. Confirma a mensagem de quota/compatibilidade quando o modelo recusar
+   a entrada; não publiques ficheiros sensíveis num teste.
 
 O frontend, a API e a rota de saúde usam o mesmo domínio; não é preciso publicar
 o frontend separadamente no GitHub Pages.

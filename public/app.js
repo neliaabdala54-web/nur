@@ -13,6 +13,10 @@ const elements = {
   authSwitchButton: $("#auth-switch-button"),
   authSwitchPrompt: $("#auth-switch-prompt"),
   appStatus: $("#app-status"),
+  attachmentButton: $("#attachment-button"),
+  attachmentInput: $("#attachment-input"),
+  attachmentMenu: $("#attachment-menu"),
+  attachmentPreview: $("#attachment-preview"),
   characterCount: $("#character-count"),
   composerForm: $("#composer-form"),
   conversationList: $("#conversation-list"),
@@ -20,6 +24,7 @@ const elements = {
   historyDelete: $("#history-delete"),
   messageInput: $("#message-input"),
   messageList: $("#message-list"),
+  microphoneButton: $("#microphone-button"),
   memoryEnabled: $("#memory-enabled"),
   memoryError: $("#memory-error"),
   memoryForm: $("#memory-form"),
@@ -41,6 +46,11 @@ const elements = {
   themeDescription: $("#theme-description"),
   themeToggle: $("#theme-toggle"),
   toast: $("#toast"),
+  recordingStatus: $("#recording-status"),
+  uploadProgress: $("#upload-progress"),
+  uploadProgressBar: $("#upload-progress-bar"),
+  uploadProgressLabel: $("#upload-progress-label"),
+  cancelUploadButton: $("#cancel-upload-button"),
   topbarAvatar: $("#topbar-avatar"),
   welcomeView: $("#welcome-view"),
   workspaceTitle: $("#workspace-title"),
@@ -52,6 +62,268 @@ let isSending = false;
 let authMode = "login";
 let toastTimer;
 let knownConversations = [];
+let selectedFiles = [];
+let mediaRecorder = null;
+let recordingChunks = [];
+let recordingStartedAt = 0;
+let recordingTimer = null;
+let activeMessageRequest = null;
+
+const MAX_FILES = 3;
+const MAX_TOTAL_FILE_BYTES = 12 * 1024 * 1024;
+const MAX_VIDEO_SECONDS = 120;
+const MAX_AUDIO_SECONDS = 60;
+const ATTACHMENT_TYPES = {
+  jpg: { mimeType: "image/jpeg", category: "image", maxBytes: 5 * 1024 * 1024 },
+  jpeg: { mimeType: "image/jpeg", category: "image", maxBytes: 5 * 1024 * 1024 },
+  png: { mimeType: "image/png", category: "image", maxBytes: 5 * 1024 * 1024 },
+  webp: { mimeType: "image/webp", category: "image", maxBytes: 5 * 1024 * 1024 },
+  mp4: { mimeType: "video/mp4", category: "video", maxBytes: 12 * 1024 * 1024 },
+  webm: { mimeType: "video/webm", category: "video", maxBytes: 12 * 1024 * 1024 },
+  mp3: { mimeType: "audio/mp3", category: "audio", maxBytes: 5 * 1024 * 1024 },
+  wav: { mimeType: "audio/wav", category: "audio", maxBytes: 5 * 1024 * 1024 },
+  ogg: { mimeType: "audio/ogg", category: "audio", maxBytes: 5 * 1024 * 1024 },
+  aac: { mimeType: "audio/aac", category: "audio", maxBytes: 5 * 1024 * 1024 },
+  flac: { mimeType: "audio/flac", category: "audio", maxBytes: 5 * 1024 * 1024 },
+  pdf: { mimeType: "application/pdf", category: "document", maxBytes: 8 * 1024 * 1024 },
+  txt: { mimeType: "text/plain", category: "text", maxBytes: 1024 * 1024 },
+  csv: { mimeType: "text/csv", category: "text", maxBytes: 1024 * 1024 },
+};
+
+function formatBytes(value) {
+  return value < 1024 * 1024
+    ? `${Math.max(1, Math.round(value / 1024))} KB`
+    : `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderSelectedFiles() {
+  elements.attachmentPreview.replaceChildren();
+  elements.attachmentPreview.hidden = selectedFiles.length === 0;
+  for (const [index, item] of selectedFiles.entries()) {
+    const row = document.createElement("div");
+    row.className = "attachment-item";
+    const preview = document.createElement("div");
+    preview.className = "attachment-thumbnail";
+    if (item.type.category === "image") {
+      const image = document.createElement("img");
+      image.src = item.url;
+      image.alt = `Pré-visualização de ${item.file.name}`;
+      preview.append(image);
+    } else if (item.type.category === "video" || item.type.category === "audio") {
+      const media = document.createElement(item.type.category);
+      media.src = item.url;
+      media.preload = "metadata";
+      media.controls = true;
+      media.setAttribute("aria-label", `Pré-visualização de ${item.file.name}`);
+      preview.append(media);
+    } else {
+      preview.textContent = item.type.category === "video"
+        ? "🎥"
+        : item.type.category === "audio"
+          ? "🎤"
+          : item.type.category === "document" || item.type.category === "text"
+            ? "📄"
+            : "📁";
+    }
+    const details = document.createElement("span");
+    details.className = "attachment-details";
+    const name = document.createElement("strong");
+    name.textContent = item.file.name;
+    const info = document.createElement("small");
+    info.textContent = `${formatBytes(item.file.size)}${item.duration ? ` · ${Math.round(item.duration)} s` : ""}`;
+    details.append(name, info);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "attachment-remove";
+    remove.setAttribute("aria-label", `Remover ${item.file.name}`);
+    remove.textContent = "×";
+    remove.addEventListener("click", () => {
+      URL.revokeObjectURL(item.url);
+      selectedFiles.splice(index, 1);
+      renderSelectedFiles();
+      updateComposer();
+    });
+    row.append(preview, details, remove);
+    elements.attachmentPreview.append(row);
+  }
+}
+
+function expectedFileType(file) {
+  const extension = file.name.split(".").at(-1)?.toLowerCase();
+  let type = ATTACHMENT_TYPES[extension];
+  if (!type) throw new Error("Este formato não é suportado. Usa imagem, áudio, MP4/WEBM, PDF, TXT ou CSV.");
+  if (extension === "webm" && file.type === "audio/webm") {
+    type = { mimeType: "audio/webm", category: "audio", maxBytes: 5 * 1024 * 1024 };
+  }
+  const browserMimeAlias = extension === "mp3" && file.type === "audio/mpeg";
+  if (file.type && file.type !== "application/octet-stream"
+    && file.type !== type.mimeType && !browserMimeAlias) {
+    throw new Error("O formato declarado não corresponde à extensão do ficheiro.");
+  }
+  if (file.size === 0) throw new Error("O ficheiro está vazio.");
+  if (file.size > type.maxBytes) throw new Error(`O ficheiro excede o limite de ${formatBytes(type.maxBytes)}.`);
+  return type;
+}
+
+async function getVideoDuration(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((resolve, reject) => {
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      video.onloadedmetadata = () => resolve(video.duration);
+      video.onerror = () => reject(new Error("Não foi possível ler a duração deste vídeo."));
+      video.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function addFiles(files) {
+  for (const file of files) {
+    try {
+      if (selectedFiles.length >= MAX_FILES) {
+        throw new Error(`Podes anexar no máximo ${MAX_FILES} ficheiros por mensagem.`);
+      }
+      const type = expectedFileType(file);
+      const currentSize = selectedFiles.reduce((total, item) => total + item.file.size, 0);
+      if (currentSize + file.size > MAX_TOTAL_FILE_BYTES) {
+        throw new Error("O tamanho total dos anexos não pode ultrapassar 12 MB.");
+      }
+      let duration;
+      if (type.category === "video") {
+        duration = await getVideoDuration(file);
+        if (!Number.isFinite(duration) || duration <= 0) {
+          throw new Error("Não foi possível determinar a duração do vídeo.");
+        }
+        if (duration > MAX_VIDEO_SECONDS) {
+          throw new Error("Os vídeos devem ter até 2 minutos para análise.");
+        }
+      }
+      selectedFiles.push({ file, type, url: URL.createObjectURL(file), duration });
+      renderSelectedFiles();
+      updateComposer();
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Não foi possível preparar ${file.name} para envio.`));
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const separator = result.indexOf(",");
+      if (separator < 0) reject(new Error(`Não foi possível ler ${file.name}.`));
+      else resolve(result.slice(separator + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function convertRecordingToWav(blob, fileName) {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    throw new Error("Este navegador não consegue converter a gravação para um formato de áudio compatível.");
+  }
+  const context = new AudioContextClass();
+  try {
+    const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+    const targetRate = 16_000;
+    const sampleCount = Math.floor(decoded.length * targetRate / decoded.sampleRate);
+    const mono = new Float32Array(sampleCount);
+    const channels = Array.from(
+      { length: decoded.numberOfChannels },
+      (_, channel) => decoded.getChannelData(channel),
+    );
+    for (let index = 0; index < sampleCount; index += 1) {
+      const start = Math.floor(index * decoded.sampleRate / targetRate);
+      const end = Math.max(start + 1, Math.floor((index + 1) * decoded.sampleRate / targetRate));
+      let total = 0;
+      for (const channel of channels) {
+        let channelTotal = 0;
+        for (let sourceIndex = start; sourceIndex < Math.min(end, channel.length); sourceIndex += 1) {
+          channelTotal += channel[sourceIndex];
+        }
+        total += channelTotal / Math.max(1, Math.min(end, channel.length) - start);
+      }
+      mono[index] = total / channels.length;
+    }
+    const wav = new ArrayBuffer(44 + sampleCount * 2);
+    const view = new DataView(wav);
+    const writeText = (offset, text) => {
+      for (let index = 0; index < text.length; index += 1) view.setUint8(offset + index, text.charCodeAt(index));
+    };
+    writeText(0, "RIFF");
+    view.setUint32(4, 36 + sampleCount * 2, true);
+    writeText(8, "WAVE");
+    writeText(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, targetRate, true);
+    view.setUint32(28, targetRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeText(36, "data");
+    view.setUint32(40, sampleCount * 2, true);
+    for (let index = 0; index < sampleCount; index += 1) {
+      const sample = Math.max(-1, Math.min(1, mono[index]));
+      view.setInt16(44 + index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    }
+    return new File([wav], fileName, { type: "audio/wav" });
+  } finally {
+    await context.close();
+  }
+}
+
+function sendMessageWithProgress(path, body) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    activeMessageRequest = xhr;
+    xhr.open("POST", path);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.upload.addEventListener("progress", (event) => {
+      if (!event.lengthComputable) return;
+      const percent = Math.round(event.loaded / event.total * 100);
+      elements.uploadProgressBar.value = percent;
+      elements.uploadProgressLabel.textContent = percent === 100
+        ? "Ficheiros enviados; o Nur está a analisar…"
+        : `A enviar ficheiros… ${percent}%`;
+    });
+    xhr.addEventListener("load", async () => {
+      activeMessageRequest = null;
+      let data = {};
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        reject(new Error("O servidor devolveu uma resposta inválida."));
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        if (xhr.status === 401) await restoreGuestSession();
+        reject(new Error(data.error || `O pedido não foi concluído (${xhr.status}).`));
+        return;
+      }
+      resolve(data);
+    });
+    xhr.addEventListener("error", () => {
+      activeMessageRequest = null;
+      reject(new Error("Falha de rede durante o envio dos ficheiros."));
+    });
+    xhr.addEventListener("abort", () => {
+      activeMessageRequest = null;
+      const error = new Error("Envio cancelado. Os ficheiros continuam anexados.");
+      error.name = "AbortError";
+      reject(error);
+    });
+    xhr.send(JSON.stringify(body));
+  });
+}
 
 function showToast(message) {
   elements.toast.textContent = message;
@@ -132,6 +404,32 @@ function addMessage({ role, content, createdAt, isError = false, typing = false 
       time.className = "message-time";
       time.textContent = formatTime(createdAt || new Date().toISOString());
       body.append(time);
+      if (role === "assistant" && "speechSynthesis" in window) {
+        const voiceControls = document.createElement("div");
+        voiceControls.className = "voice-controls";
+        const speak = document.createElement("button");
+        speak.type = "button";
+        speak.textContent = "🔊 Ouvir";
+        speak.setAttribute("aria-label", "Ouvir resposta do Nur");
+        speak.addEventListener("click", () => {
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(content);
+          utterance.lang = "pt-MZ";
+          window.speechSynthesis.speak(utterance);
+        });
+        const pause = document.createElement("button");
+        pause.type = "button";
+        pause.textContent = "⏸ Pausar";
+        pause.addEventListener("click", () => window.speechSynthesis.pause());
+        pause.setAttribute("aria-label", "Pausar leitura");
+        const stop = document.createElement("button");
+        stop.type = "button";
+        stop.textContent = "⏹ Parar";
+        stop.addEventListener("click", () => window.speechSynthesis.cancel());
+        stop.setAttribute("aria-label", "Parar leitura");
+        voiceControls.append(speak, pause, stop);
+        body.append(voiceControls);
+      }
     }
     message.append(body);
   }
@@ -260,14 +558,20 @@ async function deleteConversation(id, title) {
   }
 }
 
-async function sendMessage(value) {
-  const content = value.trim();
-  if (!content || isSending) return;
+async function sendMessage(value, files = selectedFiles) {
+  const plainContent = value.trim();
+  const content = plainContent || (files.length ? "Analisa o conteúdo do(s) ficheiro(s) anexado(s)." : "");
+  if ((!content && !files.length) || isSending) return;
 
   isSending = true;
   elements.sendButton.disabled = true;
   elements.messageInput.disabled = true;
+  elements.attachmentButton.disabled = true;
+  elements.microphoneButton.disabled = true;
   elements.composerForm.setAttribute("aria-busy", "true");
+  elements.uploadProgress.hidden = files.length === 0;
+  elements.uploadProgressBar.value = 0;
+  if (files.length) elements.uploadProgressLabel.textContent = "A preparar anexos…";
   try {
     let createdConversation = false;
     if (!activeConversationId) {
@@ -282,19 +586,33 @@ async function sendMessage(value) {
       (conversation) => conversation.id === activeConversationId,
     );
     const isFirstMessage = createdConversation || previousConversation?.title === "Nova conversa";
-    const userMessage = addMessage({ role: "user", content, createdAt: new Date().toISOString() });
+    const visibleContent = files.length
+      ? `${content}\n\n[Anexos: ${files.map(({ file }) => file.name).join(", ")}]`
+      : content;
+    const userMessage = addMessage({ role: "user", content: visibleContent, createdAt: new Date().toISOString() });
     const typing = addMessage({ role: "assistant", typing: true });
     elements.messageInput.value = "";
     updateComposer();
 
     try {
-      const data = await api(
-        `/api/conversations/${encodeURIComponent(activeConversationId)}/messages`,
-        { method: "POST", body: JSON.stringify({ content }) },
-      );
+      const path = `/api/conversations/${encodeURIComponent(activeConversationId)}/messages`;
+      const data = files.length
+        ? await sendMessageWithProgress(path, {
+          content,
+          attachments: await Promise.all(files.map(async ({ file, type }) => ({
+            name: file.name,
+            mimeType: type.mimeType,
+            data: await readFileAsBase64(file),
+          }))),
+        })
+        : await api(path, { method: "POST", body: JSON.stringify({ content }) });
       typing.remove();
       userMessage.remove();
       for (const message of data.messages) addMessage(message);
+      selectedFiles.forEach(({ url }) => URL.revokeObjectURL(url));
+      selectedFiles = [];
+      renderSelectedFiles();
+      elements.recordingStatus.hidden = true;
       const title = isFirstMessage ? content.slice(0, 64) : previousConversation.title;
       rememberConversation({
         ...previousConversation,
@@ -306,6 +624,8 @@ async function sendMessage(value) {
       elements.appStatus.textContent = "Resposta recebida do Nur.";
     } catch (error) {
       typing.remove();
+      elements.messageInput.value = content;
+      updateComposer();
       addMessage({ role: "assistant", content: error.message, isError: true });
       await refreshConversations().catch((refreshError) => showToast(refreshError.message));
       showToast(error.message);
@@ -313,8 +633,12 @@ async function sendMessage(value) {
   } catch (error) {
     showToast(error.message);
   } finally {
+    activeMessageRequest = null;
+    elements.uploadProgress.hidden = true;
     isSending = false;
     elements.messageInput.disabled = false;
+    elements.attachmentButton.disabled = false;
+    elements.microphoneButton.disabled = false;
     elements.composerForm.removeAttribute("aria-busy");
     updateComposer();
     elements.messageInput.focus();
@@ -324,7 +648,7 @@ async function sendMessage(value) {
 function updateComposer() {
   const length = elements.messageInput.value.length;
   elements.characterCount.textContent = `${length.toLocaleString("pt-MZ")} / 4000`;
-  elements.sendButton.disabled = isSending || length === 0 || !elements.messageInput.value.trim();
+  elements.sendButton.disabled = isSending || (!elements.messageInput.value.trim() && selectedFiles.length === 0);
   elements.messageInput.style.height = "auto";
   elements.messageInput.style.height = `${Math.min(elements.messageInput.scrollHeight, 172)}px`;
 }
@@ -436,6 +760,96 @@ elements.composerForm.addEventListener("submit", (event) => {
 });
 
 elements.messageInput.addEventListener("input", updateComposer);
+elements.attachmentButton.addEventListener("click", () => {
+  const willOpen = elements.attachmentMenu.hidden;
+  elements.attachmentMenu.hidden = !willOpen;
+  elements.attachmentButton.setAttribute("aria-expanded", String(willOpen));
+});
+elements.attachmentMenu.querySelectorAll("[data-file-kind]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const filters = {
+      image: ".jpg,.jpeg,.png,.webp",
+      video: ".mp4,.webm",
+      document: ".pdf,.txt,.csv",
+      all: `.${Object.keys(ATTACHMENT_TYPES).join(",.")}`,
+    };
+    elements.attachmentInput.accept = filters[button.dataset.fileKind];
+    elements.attachmentMenu.hidden = true;
+    elements.attachmentButton.setAttribute("aria-expanded", "false");
+    elements.attachmentInput.click();
+  });
+});
+elements.attachmentInput.addEventListener("change", async () => {
+  await addFiles(Array.from(elements.attachmentInput.files || []));
+  elements.attachmentInput.value = "";
+});
+elements.cancelUploadButton.addEventListener("click", () => activeMessageRequest?.abort());
+elements.microphoneButton.addEventListener("click", async () => {
+  if (mediaRecorder?.state === "recording") {
+    mediaRecorder.stop();
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    showToast("A gravação de áudio não está disponível neste navegador. Podes anexar um ficheiro de áudio compatível.");
+    return;
+  }
+  if (selectedFiles.length >= MAX_FILES) {
+    showToast(`Podes anexar no máximo ${MAX_FILES} ficheiros por mensagem.`);
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus"]
+      .find((type) => MediaRecorder.isTypeSupported(type));
+    if (!mimeType) {
+      stream.getTracks().forEach((track) => track.stop());
+      throw new Error("Este navegador não oferece um formato de gravação compatível.");
+    }
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
+    recordingChunks = [];
+    mediaRecorder.addEventListener("dataavailable", (event) => {
+      if (event.data.size) recordingChunks.push(event.data);
+    });
+    mediaRecorder.addEventListener("stop", async () => {
+      clearInterval(recordingTimer);
+      stream.getTracks().forEach((track) => track.stop());
+      const duration = (Date.now() - recordingStartedAt) / 1000;
+      mediaRecorder = null;
+      elements.microphoneButton.textContent = "🎤";
+      elements.microphoneButton.setAttribute("aria-label", "Gravar mensagem de áudio");
+      elements.recordingStatus.textContent = "A preparar o áudio gravado…";
+      if (duration > MAX_AUDIO_SECONDS) {
+        showToast("O áudio deve ter até 60 segundos.");
+        return;
+      }
+      try {
+        const source = new Blob(recordingChunks, { type: mimeType.split(";")[0] });
+        const file = await convertRecordingToWav(source, `gravacao-${Date.now()}.wav`);
+        elements.recordingStatus.textContent = `Áudio pronto (${Math.round(duration)} s). Podes enviar ou removê-lo.`;
+        await addFiles([file]);
+      } catch (error) {
+        elements.recordingStatus.textContent = "";
+        elements.recordingStatus.hidden = true;
+        showToast(error.message);
+      }
+    });
+    recordingStartedAt = Date.now();
+    mediaRecorder.start();
+    elements.recordingStatus.hidden = false;
+    elements.recordingStatus.textContent = "🔴 A gravar… 0 s (máximo 60 s)";
+    elements.microphoneButton.textContent = "⏹";
+    elements.microphoneButton.setAttribute("aria-label", "Parar gravação");
+    recordingTimer = setInterval(() => {
+      const seconds = Math.floor((Date.now() - recordingStartedAt) / 1000);
+      elements.recordingStatus.textContent = `🔴 A gravar… ${seconds} s (máximo 60 s)`;
+      if (seconds >= MAX_AUDIO_SECONDS && mediaRecorder?.state === "recording") mediaRecorder.stop();
+    }, 500);
+  } catch (error) {
+    showToast(error.name === "NotAllowedError"
+      ? "O acesso ao microfone foi recusado. Permite o microfone nas definições do navegador."
+      : error.message);
+  }
+});
 elements.messageInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();

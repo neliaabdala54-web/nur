@@ -48,6 +48,46 @@ Em desenvolvimento, o servidor escuta em `127.0.0.1`; em produção escuta em
 `/health`. Para publicar no Render e preservar utilizadores e conversas,
 consulta [DEPLOY.md](./DEPLOY.md).
 
+## Texto, áudio, imagens, vídeo e documentos
+
+O compositor permite escrever, anexar até três ficheiros ou gravar uma
+mensagem de áudio no navegador. A análise de ficheiros é enviada pelo backend
+ao endpoint oficial `generateContent` da Gemini, usando o modelo configurado
+(`AI_MODEL`, por omissão `gemini-3.1-flash-lite`); a chave nunca é enviada ao
+navegador. Ficheiros compatíveis: JPG/JPEG, PNG, WEBP, MP4, WEBM, MP3, WAV,
+OGG, AAC, FLAC, PDF, TXT e CSV. DOC/DOCX e XLS/XLSX ainda não são suportados.
+
+Os limites do servidor são 3 ficheiros e 12 MB no total por mensagem, com
+limites menores por formato; vídeos têm também um limite de 2 minutos verificado
+no navegador e a gravação de áudio termina aos 60 segundos. O tamanho e o
+conteúdo do ficheiro são verificados no backend. O servidor não guarda os bytes
+dos anexos: apenas a mensagem, os nomes dos ficheiros e a resposta ficam no
+histórico. Uma pergunta posterior pode usar o texto e a resposta anteriores,
+mas não volta a analisar o ficheiro original após recarregar a página.
+Cada utilizador autenticado/sessão visitante pode enviar até 8 mensagens por
+minuto; são permitidas até 4 análises multimodais simultâneas por instância.
+Estes limites são locais ao processo, não um serviço distribuído de proteção
+contra abuso.
+
+O microfone requer permissão do navegador e contexto seguro (HTTPS ou
+localhost). A resposta por voz usa a síntese de voz integrada no navegador;
+não é áudio gerado pela Gemini e depende das vozes instaladas no dispositivo.
+Sem suporte do navegador, podes continuar a anexar um ficheiro de áudio
+compatível.
+
+A capacidade e a quota de análise multimodal dependem do modelo disponível para
+a chave, região e conta. O projeto não troca de modelo nem de plano
+automaticamente, não usa a Files API para armazenar uploads na Google e não
+garante que todos os formatos/modelos estejam disponíveis no Free Tier.
+Confirma limites e preços atuais na [documentação de modelos Gemini](https://ai.google.dev/gemini-api/docs/models)
+e na [página de preços](https://ai.google.dev/gemini-api/docs/pricing). A
+documentação atual lista `gemini-3.1-flash-lite` como modelo de entrada
+multimodal (texto, imagem, vídeo, áudio e PDF). Isso não garante quota gratuita
+para cada conta/região. Google Search Grounding tem condições/quota distintas e
+pode exigir acesso pago; o código não ativa um plano nem promete que essa
+pesquisa seja gratuita. Ficheiros incompatíveis com o modelo resultam numa
+mensagem explícita, não numa análise simulada.
+
 ## Base Oficial de Maxixe
 
 Quando disponível, `Bot_Nur_Maxixe_Base_Tecnica_v1.json` é a fonte estruturada

@@ -7,11 +7,15 @@ import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateReply } from "./src/ai/index.mjs";
 import { hasAiApiKey } from "./src/ai/model-client.mjs";
+import { validateUploadedAttachments } from "./src/media-input.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = resolve(root, "public");
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_MULTIMODAL_BODY_BYTES = 18 * 1024 * 1024;
 const SESSION_AGE = 30 * 24 * 60 * 60;
+const MESSAGE_RATE_LIMIT = 8;
+const MESSAGE_RATE_WINDOW_MS = 60_000;
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -116,16 +120,16 @@ function sendJson(response, status, body, headers = {}) {
   response.end(JSON.stringify(body));
 }
 
-async function readJson(request) {
+async function readJson(request, maxBodyBytes = MAX_BODY_BYTES) {
   const declaredSize = Number(request.headers["content-length"] || 0);
-  if (declaredSize > MAX_BODY_BYTES) {
+  if (declaredSize > maxBodyBytes) {
     throw new HttpError(413, "A mensagem é demasiado grande.");
   }
   let size = 0;
   const chunks = [];
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > MAX_BODY_BYTES) {
+    if (size > maxBodyBytes) {
       throw new HttpError(413, "A mensagem é demasiado grande.");
     }
     chunks.push(chunk);
@@ -187,6 +191,15 @@ function requireAccount(user) {
 }
 
 function getAiErrorMessage(error) {
+  if (error.code === "AI_MEDIA_REJECTED") {
+    return "Neste momento não consigo analisar este formato ou tamanho de ficheiro com o modelo Gemini configurado.";
+  }
+  if (error.code === "AI_MEDIA_NOT_CONFIGURED") {
+    return "Não consigo analisar ficheiros sem a configuração Gemini do servidor. O administrador tem de configurar a IA.";
+  }
+  if (error.code === "AI_MEDIA_UNSUPPORTED") {
+    return "Este tipo de análise não está disponível com a configuração Gemini atual.";
+  }
   if (error.name === "AbortError") {
     return "A Gemini demorou demasiado a responder. Tenta novamente dentro de instantes.";
   }
@@ -277,14 +290,16 @@ async function serveStatic(pathname, response, method) {
     "Content-Type": MIME_TYPES[extname(filename)] || "application/octet-stream",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Content-Security-Policy": "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    "Content-Security-Policy": "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     "X-Frame-Options": "DENY",
   });
   response.end(method === "HEAD" ? undefined : contents);
 }
 
-export function createAppServer({ dataDir } = {}) {
+export function createAppServer({ dataDir, generateReplyImpl = generateReply } = {}) {
   const database = openDatabase(dataDir);
+  const messageRequests = new Map();
+  let activeMediaRequests = 0;
   const statements = {
     conversation: database.prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?"),
     insertMessage: database.prepare(
@@ -527,15 +542,39 @@ export function createAppServer({ dataDir } = {}) {
       if (messagesMatch && method === "POST") {
         const user = getSessionUser(request, database);
         if (!user) throw new HttpError(401, "A tua sessão expirou. Volta a ligar-te.");
-        const body = await readJson(request);
+        const body = await readJson(request, MAX_MULTIMODAL_BODY_BYTES);
         const content = typeof body.content === "string" ? body.content.trim() : "";
-        if (!content || content.length > 4000) {
+        if (content.length > 4000) {
           throw new HttpError(400, "A mensagem deve ter entre 1 e 4 000 caracteres.");
         }
+        let attachments;
+        try {
+          attachments = validateUploadedAttachments(body.attachments ?? []);
+        } catch (error) {
+          if (error.code === "INVALID_MEDIA") {
+            throw new HttpError(error.status || 400, error.message);
+          }
+          throw error;
+        }
+        if (!content && attachments.length === 0) {
+          throw new HttpError(400, "Escreve uma mensagem ou anexa um ficheiro.");
+        }
+        const effectiveContent = content || "Analisa o conteúdo do(s) ficheiro(s) anexado(s).";
         const conversationId = messagesMatch[1];
         if (!statements.conversation.get(conversationId, user.id)) {
           throw new HttpError(404, "Esta conversa não existe.");
         }
+        const now = Date.now();
+        const recentRequests = (messageRequests.get(user.id) || [])
+          .filter((timestamp) => now - timestamp < MESSAGE_RATE_WINDOW_MS);
+        if (recentRequests.length >= MESSAGE_RATE_LIMIT) {
+          throw new HttpError(429, "O Nur recebeu muitas mensagens em pouco tempo. Espera um minuto e tenta novamente.");
+        }
+        if (attachments.length && activeMediaRequests >= 4) {
+          throw new HttpError(429, "O Nur está a analisar vários ficheiros neste momento. Tenta novamente dentro de instantes.");
+        }
+        recentRequests.push(now);
+        messageRequests.set(user.id, recentRequests);
 
         const messageId = createId();
         const existingCount = database.prepare(
@@ -551,24 +590,51 @@ export function createAppServer({ dataDir } = {}) {
         const userMemory = user.email && (settings?.useMemory ?? 1)
           ? readUserMemory(database, user.id)
           : [];
-        statements.insertMessage.run(messageId, conversationId, "user", content);
+        const attachmentLabels = attachments.length
+          ? `\n\n[Ficheiros analisados nesta mensagem: ${attachments.map(({ name }) => name).join(", ")}. Os ficheiros originais não ficam guardados no histórico.]`
+          : "";
+        statements.insertMessage.run(
+          messageId,
+          conversationId,
+          "user",
+          `${effectiveContent}${attachmentLabels}`,
+        );
         database.prepare(`
           UPDATE conversations SET updated_at = datetime('now'),
             title = CASE WHEN ? = 0 THEN ? ELSE title END
           WHERE id = ? AND user_id = ?
-        `).run(existingCount, content.slice(0, 64), conversationId, user.id);
+        `).run(existingCount, effectiveContent.slice(0, 64), conversationId, user.id);
 
+        const includesMedia = attachments.length > 0;
+        if (includesMedia) activeMediaRequests += 1;
+        const generationAbortController = includesMedia ? new AbortController() : null;
+        const abortGeneration = () => generationAbortController?.abort();
+        if (generationAbortController) response.once("close", abortGeneration);
         let reply;
         try {
-          reply = await generateReply(content, replyHistory, { userMemory });
-        } catch (error) {
-          console.error("[bot-nur] Falha ao gerar resposta:", {
-            name: error.name,
-            status: Number.isInteger(error.status) ? error.status : undefined,
-            providerType: typeof error.providerType === "string" ? error.providerType : undefined,
-            model: typeof error.model === "string" ? error.model : undefined,
+          reply = await generateReplyImpl(effectiveContent, replyHistory, {
+            userMemory,
+            media: attachments,
+            signal: generationAbortController?.signal,
           });
-          throw new HttpError(error.status === 429 ? 429 : 502, getAiErrorMessage(error));
+        } catch (error) {
+          if (!generationAbortController?.signal.aborted) {
+            console.error("[bot-nur] Falha ao gerar resposta:", {
+              name: error.name,
+              status: Number.isInteger(error.status) ? error.status : undefined,
+              providerType: typeof error.providerType === "string" ? error.providerType : undefined,
+              model: typeof error.model === "string" ? error.model : undefined,
+            });
+          }
+          const status = error.status === 429
+            ? 429
+            : error.code === "AI_MEDIA_NOT_CONFIGURED"
+              ? 503
+              : 502;
+          throw new HttpError(status, getAiErrorMessage(error));
+        } finally {
+          if (generationAbortController) response.removeListener("close", abortGeneration);
+          if (includesMedia) activeMediaRequests -= 1;
         }
         const assistantMessage = {
           id: createId(),
@@ -587,7 +653,12 @@ export function createAppServer({ dataDir } = {}) {
         ).run(conversationId);
         sendJson(response, 201, {
           messages: [
-            { id: messageId, role: "user", content, createdAt: new Date().toISOString() },
+            {
+              id: messageId,
+              role: "user",
+              content: `${effectiveContent}${attachmentLabels}`,
+              createdAt: new Date().toISOString(),
+            },
             assistantMessage,
           ],
           aiConfigured: hasAiApiKey(),
@@ -604,6 +675,7 @@ export function createAppServer({ dataDir } = {}) {
       }
       await serveStatic(path, response, method);
     } catch (error) {
+      if (request.aborted || response.destroyed) return;
       const status = error instanceof HttpError ? error.status : 500;
       if (status === 500) console.error("[bot-nur] Erro inesperado:", error);
       if (!response.headersSent) {

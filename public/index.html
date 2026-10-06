@@ -7,8 +7,8 @@
     <meta name="description" content="Conversa com o Bot Nur: ajuda próxima para os teus estudos, ideias e descobertas em Moçambique.">
     <title>Bot Nur — uma boa ideia começa aqui</title>
     <link rel="icon" href="/nur-mark.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/styles.css?v=3">
-    <script type="module" src="/app.js?v=5"></script>
+    <link rel="stylesheet" href="/styles.css?v=5">
+    <script type="module" src="/app.js?v=7"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -124,10 +124,31 @@
 
           <div class="composer-area">
             <form class="composer-form" id="composer-form">
+              <input id="attachment-input" type="file" multiple hidden
+                accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,audio/aac,audio/flac,application/pdf,text/plain,text/csv">
+              <div class="attachment-preview" id="attachment-preview" hidden aria-live="polite"></div>
+              <div class="recording-status" id="recording-status" hidden role="status"></div>
+              <div class="upload-progress" id="upload-progress" hidden role="status">
+                <progress id="upload-progress-bar" max="100" value="0"></progress>
+                <span id="upload-progress-label">A preparar anexos…</span>
+                <button id="cancel-upload-button" type="button">Cancelar</button>
+              </div>
               <label class="visually-hidden" for="message-input">A tua mensagem para o Nur</label>
-              <textarea id="message-input" name="message" rows="1" placeholder="Escreve o que te vai na cabeça..." maxlength="4000" required></textarea>
+              <textarea id="message-input" name="message" rows="1" placeholder="Escreve o que te vai na cabeça..." maxlength="4000"></textarea>
               <div class="composer-toolbar">
-                <span class="composer-hint"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v4l2.5 1.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg> Leva o tempo que precisares</span>
+                <div class="composer-tools">
+                  <div class="attachment-menu-wrap">
+                    <button class="composer-tool-button" id="attachment-button" type="button" aria-label="Anexar ficheiros" aria-expanded="false" aria-controls="attachment-menu">+</button>
+                    <div class="attachment-menu" id="attachment-menu" hidden>
+                      <button type="button" data-file-kind="image">Imagem</button>
+                      <button type="button" data-file-kind="video">Vídeo</button>
+                      <button type="button" data-file-kind="document">Documento (PDF/TXT/CSV)</button>
+                      <button type="button" data-file-kind="all">Outro ficheiro compatível</button>
+                    </div>
+                  </div>
+                  <button class="composer-tool-button microphone-button" id="microphone-button" type="button" aria-label="Gravar mensagem de áudio" title="Gravar áudio">🎤</button>
+                  <span class="composer-hint"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v4l2.5 1.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg> Leva o tempo que precisares</span>
+                </div>
                 <div class="composer-actions">
                   <span class="character-count" id="character-count">0 / 4000</span>
                   <button class="send-button" id="send-button" type="submit" aria-label="Enviar mensagem" disabled>

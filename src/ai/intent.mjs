@@ -51,18 +51,22 @@ export function identifyIntent(input, knowledge = null) {
   const requestedCategories = findRequestedCategories(text);
   const isGreeting = patterns.greeting.test(text) && text.length < 100;
   const isCreatorQuestion = identityQuestion.test(normalized);
+  const isPublicOfficeQuestion = /\b(presidente|governador(?:a)?|primeiro[- ]ministro|ministro)\b/i.test(text)
+    && /\b(mo[çc]ambique|inhambane)\b/i.test(normalized);
   const tourism = getTourismIntent(text);
   const hasBusinessIntent = patterns.business.test(text);
   const explicitSchoolContext = /\b(escolar|escola|classe|disciplina|exerc[ií]cio|teste|prova|li[cç][ãa]o|dever|mat[eé]ria)\b/i.test(text);
   const isEducation = patterns.education.test(text)
     && (!hasBusinessIntent || explicitSchoolContext)
     && (!tourism.isTourismQuestion || explicitSchoolContext);
-  const isLocal = requestedCategories.length > 0
+  const isLocal = !isPublicOfficeQuestion && (
+    requestedCategories.length > 0
     || /\b(maxixe|inhambane)\b/i.test(normalized)
     || /\b(bairro|zona|localidade)\b/i.test(normalized)
     || tourism.isTourismQuestion && tourism.geography.places.length > 0
     || isCreatorQuestion
-    || !isEducation && hasKnownLocalEntity(text, knowledge);
+    || !isEducation && hasKnownLocalEntity(text, knowledge)
+  );
   const locality = isLocal
     ? identifyRequestedLocality(text)
     : null;
@@ -73,7 +77,7 @@ export function identifyIntent(input, knowledge = null) {
   else if (tourism.isTourismQuestion) category = "tourism";
   else if (patterns.relationships.test(text)) category = "relationships";
   else if (patterns.content.test(text)) category = "content";
-  else if (patterns.mozambique.test(text) && !isLocal) category = "mozambique";
+  else if ((patterns.mozambique.test(text) || isPublicOfficeQuestion) && !isLocal) category = "mozambique";
   else if (isLocal) category = "local";
 
   return {

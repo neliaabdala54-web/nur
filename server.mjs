@@ -186,6 +186,28 @@ function requireAccount(user) {
   if (!user.email) throw new HttpError(403, "Cria uma conta para guardar memória pessoal.");
 }
 
+function getAiErrorMessage(error) {
+  if (error.name === "AbortError") {
+    return "A Gemini demorou demasiado a responder. Tenta novamente dentro de instantes.";
+  }
+  if (error.status === 429) {
+    return "O limite de utilização da Gemini foi atingido. Tenta mais tarde ou verifica a quota da API.";
+  }
+  if (error.status === 401 || error.status === 403) {
+    return "A configuração Gemini não foi autorizada. O administrador deve verificar as credenciais e permissões do serviço.";
+  }
+  if (error.status === 400) {
+    return "A Gemini rejeitou este pedido. Tenta reformular a mensagem ou pede ao administrador para verificar o modelo configurado.";
+  }
+  if (Number.isInteger(error.status) && error.status >= 500) {
+    return `A Gemini está temporariamente indisponível (HTTP ${error.status}). Tenta novamente mais tarde.`;
+  }
+  if (error.message === "GEMINI_API_KEY não configurada.") {
+    return "O serviço de IA não está configurado neste momento. Informa o administrador.";
+  }
+  return "Não foi possível obter uma resposta da Gemini. Tenta novamente dentro de instantes.";
+}
+
 function readUserMemory(database, userId) {
   return database.prepare(`
     SELECT category, content, updated_at AS updatedAt
@@ -274,6 +296,11 @@ export function createAppServer({ dataDir } = {}) {
       const url = new URL(request.url, "http://localhost");
       const path = url.pathname;
       const method = request.method;
+
+      if (path === "/health" && method === "GET") {
+        sendJson(response, 200, { status: "ok" });
+        return;
+      }
 
       if (path === "/api/health" && method === "GET") {
         sendJson(response, 200, { status: "ok", aiConfigured: hasAiApiKey() });
@@ -535,16 +562,13 @@ export function createAppServer({ dataDir } = {}) {
         try {
           reply = await generateReply(content, replyHistory, { userMemory });
         } catch (error) {
-          console.error("[bot-nur] Falha ao gerar resposta:", error);
-          if (error.status === 429) {
-            throw new HttpError(429, "O limite de utilização da Gemini foi atingido. Tenta mais tarde ou verifica a quota da API.");
-          }
-          throw new HttpError(
-            502,
-            error.name === "AbortError"
-              ? "O serviço demorou demasiado a responder. Tenta novamente."
-              : "Não foi possível obter uma resposta agora. Tenta novamente dentro de instantes.",
-          );
+          console.error("[bot-nur] Falha ao gerar resposta:", {
+            name: error.name,
+            status: Number.isInteger(error.status) ? error.status : undefined,
+            providerType: typeof error.providerType === "string" ? error.providerType : undefined,
+            model: typeof error.model === "string" ? error.model : undefined,
+          });
+          throw new HttpError(error.status === 429 ? 429 : 502, getAiErrorMessage(error));
         }
         const assistantMessage = {
           id: createId(),
@@ -600,8 +624,9 @@ const invokedFile = process.argv[1] && resolve(process.argv[1]);
 if (invokedFile === resolve(fileURLToPath(import.meta.url))) {
   const server = createAppServer();
   const port = Number(process.env.PORT || 3000);
-  const host = process.env.HOST || "127.0.0.1";
+  const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true";
+  const host = isProduction ? "0.0.0.0" : process.env.HOST || "127.0.0.1";
   server.listen(port, host, () => {
-    console.log(`Bot Nur disponível em http://localhost:${port}`);
+    console.log(`Bot Nur a escutar em ${host}:${port}`);
   });
 }

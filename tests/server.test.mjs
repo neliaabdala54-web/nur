@@ -7,7 +7,6 @@ import { createAppServer } from "../server.mjs";
 
 process.env.AI_API_KEY = "";
 process.env.GEMINI_API_KEY = "";
-process.env.SEARCH_API_KEY = "";
 
 const dataDir = await mkdtemp(join(tmpdir(), "bot-nur-test-"));
 const server = createAppServer({ dataDir });
@@ -46,6 +45,10 @@ test("serves the interface and reports the API health status", async () => {
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-type"), /text\/html/);
   assert.match(await page.text(), /Uma boa ideia/);
+
+  const publicHealth = await request("/health");
+  assert.equal(publicHealth.data.status, "ok");
+  assert.deepEqual(Object.keys(publicHealth.data), ["status"]);
 
   const previousGeminiKey = process.env.GEMINI_API_KEY;
   try {

@@ -39,6 +39,82 @@ function extractAnswerFromPayload(data) {
   throw new Error("O serviço de IA devolveu uma resposta vazia ou num formato inesperado.");
 }
 
+function normalizeGoogleContents(messages) {
+  const contents = [];
+  const systemInstructions = [];
+
+  for (const message of messages) {
+    if (message.role === "system") {
+      systemInstructions.push(message.content);
+      continue;
+    }
+
+    const role = message.role === "assistant" ? "model" : "user";
+    const previous = contents.at(-1);
+    if (previous?.role === role) {
+      previous.parts[0].text += `\n${message.content}`;
+    } else {
+      contents.push({ role, parts: [{ text: message.content }] });
+    }
+  }
+
+  return {
+    contents,
+    systemInstruction: systemInstructions.length
+      ? { parts: [{ text: systemInstructions.join("\n\n") }] }
+      : undefined,
+  };
+}
+
+function extractGroundedSources(candidate, retrievedAt) {
+  const chunks = candidate?.groundingMetadata?.groundingChunks;
+  const supports = candidate?.groundingMetadata?.groundingSupports;
+  if (!Array.isArray(chunks)) return [];
+
+  const excerpts = new Map();
+  if (Array.isArray(supports)) {
+    for (const support of supports) {
+      const excerpt = typeof support?.segment?.text === "string"
+        ? support.segment.text.trim()
+        : "";
+      if (!excerpt || !Array.isArray(support.groundingChunkIndices)) continue;
+      for (const index of support.groundingChunkIndices) {
+        excerpts.set(index, [excerpts.get(index), excerpt].filter(Boolean).join(" "));
+      }
+    }
+  }
+
+  const seen = new Set();
+  return chunks.flatMap((chunk, index) => {
+    const web = chunk?.web;
+    if (typeof web?.uri !== "string" || typeof web.title !== "string") return [];
+    let url;
+    try {
+      url = new URL(web.uri);
+    } catch {
+      return [];
+    }
+    if (
+      url.protocol !== "https:"
+      || !url.hostname
+      || url.username
+      || url.password
+      || url.hostname === "localhost"
+      || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(url.hostname)
+      || seen.has(url.href)
+    ) return [];
+    seen.add(url.href);
+    return [{
+      title: (web.title.trim() || url.hostname).slice(0, 240),
+      url: url.href,
+      excerpt: (excerpts.get(index) || "").slice(0, 1200),
+      publishedAt: null,
+      retrievedAt,
+      isCurrent: true,
+    }];
+  });
+}
+
 function getAiApiKey(environment) {
   return String(environment.GEMINI_API_KEY || "").trim()
     || String(environment.AI_API_KEY || "").trim();
@@ -60,6 +136,8 @@ export async function generateWithModel(messages, {
   environment = process.env,
   fetchImpl = fetch,
   responseFormat,
+  googleSearch = false,
+  includeGroundingMetadata = false,
   timeoutMs = 30_000,
 } = {}) {
   const normalizedMessages = normalizeMessages(messages);
@@ -90,24 +168,44 @@ export async function generateWithModel(messages, {
 
   const isGeminiEndpoint = parsedBaseUrl.hostname === "generativelanguage.googleapis.com";
   const model = environment.AI_MODEL || "gemini-3.1-flash-lite";
+  if (googleSearch && !isGeminiEndpoint) {
+    throw new Error("Google Search Grounding requer o endpoint oficial da Gemini.");
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     let response;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      response = await fetchImpl(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-        Authorization: `Bearer ${apiKey}`,
+      const googleContents = googleSearch ? normalizeGoogleContents(normalizedMessages) : null;
+      const endpoint = googleSearch
+        ? `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
+        : `${baseUrl}/chat/completions`;
+      const headers = googleSearch
+        ? { "x-goog-api-key": apiKey, "Content-Type": "application/json" }
+        : {
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+        };
+      const body = googleSearch
+        ? {
+          ...googleContents,
+          tools: [{ google_search: {} }],
+          generationConfig: {
+            temperature: 0.7,
+            ...(responseFormat?.type === "json_object" ? { responseMimeType: "application/json" } : {}),
+          },
+        }
+        : {
           model,
           ...(isGeminiEndpoint ? { reasoning_effort: "low" } : {}),
           messages: normalizedMessages,
           ...(responseFormat ? { response_format: responseFormat } : {}),
           temperature: 0.7,
-        }),
+        };
+      response = await fetchImpl(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
       if (response.ok || ![502, 503, 504].includes(response.status) || attempt === 2) break;
@@ -143,12 +241,28 @@ export async function generateWithModel(messages, {
       throw error;
     }
     const data = await response.json();
-    const answer = extractAnswerFromPayload(data);
+    const candidate = data?.candidates?.[0];
+    const answer = googleSearch
+      ? candidate?.content?.parts
+        ?.map((part) => (typeof part?.text === "string" ? part.text : ""))
+        .filter(Boolean)
+        .join("\n")
+      : extractAnswerFromPayload(data);
     if (typeof answer !== "string" || !answer.trim()) {
       throw new Error("O serviço de IA devolveu uma resposta vazia.");
     }
     if (!isSafeModelResponse(answer)) {
       throw new Error("A resposta do serviço de IA foi bloqueada por validação de segurança.");
+    }
+    if (includeGroundingMetadata) {
+      const retrievedAt = new Date().toISOString();
+      const sources = extractGroundedSources(candidate, retrievedAt);
+      return {
+        answer: answer.trim(),
+        sources,
+        retrievedAt,
+        hasCurrentEvidence: sources.length > 0,
+      };
     }
     return answer.trim();
   } finally {

@@ -36,16 +36,17 @@ código nem a ficheiros versionados. Sem uma chave válida, o Bot Nur usa as
 respostas locais. As perguntas sobre Maxixe incluem também o ficheiro de
 conhecimento local.
 
-Por segurança, o servidor local escuta apenas em `127.0.0.1`. Para publicação,
-coloca-o atrás de um proxy HTTPS, define `NODE_ENV=production` para cookies
-`Secure` e configura `HOST` apenas para o endereço interno necessário (por
-exemplo, `0.0.0.0` dentro de um contentor acessível somente pelo proxy). Não
-exponhas a porta HTTP diretamente à Internet.
+Perguntas sobre cargos atuais, notícias e outros assuntos que mudam ativam a
+ferramenta oficial Google Search Grounding da Gemini. As referências devolvidas
+pela ferramenta são mantidas na resposta. Sem chave, sem resultados citados ou
+quando o serviço falha, o Bot Nur declara que não conseguiu verificar; não usa
+uma resposta sem fontes como confirmação atual.
 
-Para ativar pesquisa web em perguntas sobre informações recentes ou
-estabelecimentos, configura `SEARCH_API_KEY` com uma chave Tavily. Se a pesquisa
-ou o modelo falhar, o erro é apresentado sem transformar uma falha numa resposta
-aparentemente válida.
+Em desenvolvimento, o servidor escuta em `127.0.0.1`; em produção escuta em
+`0.0.0.0` e aceita a porta `PORT` fornecida pela plataforma. Define
+`NODE_ENV=production` para cookies `Secure`. O endpoint simples de saúde é
+`/health`. Para publicar no Render e preservar utilizadores e conversas,
+consulta [DEPLOY.md](./DEPLOY.md).
 
 ## Base Oficial de Maxixe
 
@@ -93,13 +94,12 @@ preencher campos ausentes nem apresentar registos não recuperados.
 Perguntas sobre informação que muda (horários, preços, contactos, eventos,
 empregos, promoções, disponibilidade, transportes, notícias e funcionamento)
 são distinguidas de perguntas históricas ou culturais estáveis. Quando
-`SEARCH_API_KEY` está configurada, um resultado só é tratado como recente se
-tiver URL HTTPS segura, título, excerto útil e data de publicação nos últimos
-90 dias. Os excertos são apresentados sem serem transformados em factos oficiais,
-com a data de publicação e de consulta. Resultados sem data recente, pesquisa
-indisponível ou falta de chave não são apresentados como atuais; o Bot Nur
-explica que é necessária confirmação direta. Datas antigas na base local
-continuam identificadas como registos, nunca como confirmação atual.
+Gemini está configurada, o servidor solicita ao Google Search Grounding uma
+resposta fundamentada e preserva os URLs/títulos de origem disponibilizados pela
+API. Só uma resposta acompanhada por fontes citadas pode sustentar informação
+atual; falta de fontes, falha de pesquisa ou falta de chave resulta numa
+declaração explícita de que não foi possível confirmar. Datas antigas na base
+local continuam identificadas como registos, nunca como confirmação atual.
 
 ## Arquitetura principal da IA
 
@@ -117,10 +117,10 @@ O pipeline de resposta é separado por responsabilidade em `src/ai/`:
 | `general-knowledge.mjs` | Respostas de contingência quando o modelo não está configurado. |
 | `maxixe-knowledge.mjs` | Carrega e indexa o JSON oficial e os factos suplementares; pesquisa registos locais, factos, bairros, estados e confiabilidade. |
 | `local-response.mjs` | Compõe respostas locais exclusivamente a partir dos registos e factos selecionados da base. |
-| `current-information.mjs` | Pesquisa dados recentes quando a chave Tavily está configurada e valida os URLs das fontes. |
+| `current-information.mjs` | Pede verificação atual via Google Search Grounding Gemini e mantém as fontes citadas pela API. |
 | `reliability.mjs` | Distingue dados locais de fontes recentes e sinaliza o que precisa de confirmação. |
 | `safety.mjs` | Aplica limites de segurança e privacidade apropriados também a menores. |
-| `model-client.mjs` | Isola a chamada ao modelo Gemini ou a outro endpoint compatível com OpenAI. |
+| `model-client.mjs` | Isola as chamadas ao endpoint Gemini compatível com OpenAI e ao `generateContent` com Google Search Grounding. |
 | `generate-reply.mjs` | Coordena as camadas e compõe a resposta final. |
 | `index.mjs` | Ponto de entrada público do agente. |
 

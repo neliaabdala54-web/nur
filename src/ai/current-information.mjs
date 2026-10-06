@@ -1,117 +1,69 @@
-const MAX_SEARCH_RESULTS = 5;
-const MAX_RESULT_CHARS = 1200;
-const MIN_EXCERPT_CHARS = 40;
-const MAX_CURRENT_AGE_DAYS = 90;
+import { generateWithModel, hasAiApiKey } from "./model-client.mjs";
 
-function safeUrl(value) {
-  try {
-    const parsed = new URL(value);
-    if (
-      parsed.protocol !== "https:"
-      || !parsed.hostname
-      || parsed.username
-      || parsed.password
-      || parsed.hostname === "localhost"
-      || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(parsed.hostname)
-    ) return null;
-    return parsed.href;
-  } catch {
-    return null;
+const EMPTY_RESULT = {
+  answer: "",
+  sources: [],
+  retrievedAt: null,
+  hasCurrentEvidence: false,
+};
+
+export function formatCurrentSearchFailure(status) {
+  if (status === 401 || status === 403) {
+    return "A pesquisa atual não foi autorizada. O administrador deve verificar a configuração e as permissões do serviço Gemini.";
   }
+  if (status === 429) {
+    return "A pesquisa atual atingiu o limite de utilização da Gemini. Tenta novamente mais tarde; não consigo confirmar esta informação agora.";
+  }
+  if (status === 400) {
+    return "A pesquisa atual foi rejeitada pelo serviço Gemini. O administrador deve verificar a configuração do modelo.";
+  }
+  if (Number.isInteger(status) && status >= 500) {
+    return "A pesquisa atual está temporariamente indisponível. Tenta novamente mais tarde; não consigo confirmar esta informação agora.";
+  }
+  return "A pesquisa de informação atual não ficou disponível neste momento. Não consigo confirmar esta informação agora; tenta novamente mais tarde ou confirma diretamente com a instituição ou serviço responsável.";
 }
 
-function isRecentPublication(publishedAt, retrievedAt) {
-  if (typeof publishedAt !== "string" || !publishedAt.trim()) return false;
-  const publicationTime = Date.parse(publishedAt);
-  const retrievalTime = Date.parse(retrievedAt);
-  if (!Number.isFinite(publicationTime) || publicationTime > retrievalTime) return false;
-  return (retrievalTime - publicationTime) / 86_400_000 <= MAX_CURRENT_AGE_DAYS;
-}
-
-export async function searchCurrentInformation(query, {
-  apiKey,
-  apiUrl = "https://api.tavily.com/search",
-  fetchImpl = fetch,
-} = {}) {
-  if (!apiKey) return { answer: "", sources: [] };
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8_000);
-  try {
-    const response = await fetchImpl(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        api_key: apiKey,
-        query,
-        search_depth: "basic",
-        max_results: MAX_SEARCH_RESULTS,
-        include_answer: true,
-      }),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new Error(`O serviço de pesquisa respondeu com HTTP ${response.status}.`);
-    }
-
-    const data = await response.json();
-    const retrievedAt = new Date().toISOString();
-    const sources = Array.isArray(data.results)
-      ? data.results.slice(0, MAX_SEARCH_RESULTS).flatMap((result, index) => {
-        const url = safeUrl(result.url);
-        const title = typeof result.title === "string" ? result.title.trim().slice(0, 240) : "";
-        const excerpt = typeof result.content === "string"
-          ? result.content.trim().slice(0, MAX_RESULT_CHARS)
-          : "";
-        return url && title && excerpt.length >= MIN_EXCERPT_CHARS
-          ? [{
-            id: `source-${index + 1}`,
-            title,
-            url,
-            excerpt,
-            publishedAt: typeof result.published_date === "string"
-              ? result.published_date
-              : typeof result.publishedAt === "string"
-                ? result.publishedAt
-                : null,
-            retrievedAt,
-            isCurrent: isRecentPublication(
-              typeof result.published_date === "string"
-                ? result.published_date
-                : result.publishedAt,
-              retrievedAt,
-            ),
-          }]
-          : [];
-      })
-      : [];
-
-    return {
-      answer: typeof data.answer === "string" ? data.answer.slice(0, MAX_RESULT_CHARS) : "",
-      sources,
-      retrievedAt,
-      hasCurrentEvidence: sources.some((source) => source.isCurrent),
-    };
-  } finally {
-    clearTimeout(timeout);
+export async function searchCurrentInformation(query, options = {}) {
+  const environment = options.environment || process.env;
+  if (!hasAiApiKey(environment)) {
+    return { ...EMPTY_RESULT };
   }
+
+  const result = await generateWithModel([
+    {
+      role: "system",
+      content: [
+        "Responde em português à pergunta usando Google Search Grounding para verificar informação atual.",
+        "Não inventes factos nem fontes. Se não conseguires confirmar, diz isso claramente.",
+        "Usa apenas afirmações suportadas pelas fontes recuperadas e mantém as citações/fonte fornecidas pela ferramenta.",
+      ].join(" "),
+    },
+    { role: "user", content: query },
+  ], {
+    ...options,
+    environment,
+    googleSearch: true,
+    includeGroundingMetadata: true,
+    timeoutMs: 30_000,
+  });
+
+  return result;
 }
 
 export function formatCurrentInformation(currentInfo) {
-  const currentSources = currentInfo.sources.filter((source) => source.isCurrent);
-  if (!currentSources.length) {
-    return currentInfo.sources.length
-      ? "Encontrei referências externas, mas sem data de publicação recente confirmável. Não posso apresentá-las como atuais; confirma diretamente com a instituição ou serviço."
-      : "Não encontrei uma fonte atual suficientemente verificável para confirmar esta informação. Confirma diretamente com a instituição ou serviço.";
+  if (currentInfo.searchFailed) {
+    return currentInfo.searchFailureMessage || formatCurrentSearchFailure();
+  }
+  if (!currentInfo.hasCurrentEvidence) {
+    return "Não encontrei fontes atuais suficientes para confirmar esta informação. Não vou inventar uma resposta; confirma diretamente com a instituição, serviço ou fonte responsável.";
   }
 
   return [
-    `Encontrei estas referências recentes (pesquisa consultada em ${(currentInfo.retrievedAt || "").slice(0, 10)}):`,
-    ...currentSources.slice(0, 3).flatMap((source) => [
-      `• ${source.title}${source.publishedAt ? ` — publicado em ${source.publishedAt}` : ""}`,
-      `  “${source.excerpt}”`,
-      `  ${source.url}`,
-    ]),
-    "Os excertos são apresentados tal como constam nos resultados de pesquisa; confirma dados importantes junto da fonte responsável.",
+    currentInfo.answer,
+    "",
+    `Fontes verificadas em ${(currentInfo.retrievedAt || "").slice(0, 10)}:`,
+    ...currentInfo.sources.slice(0, 5).map(
+      (source, index) => `${index + 1}. ${source.title}: ${source.url}`,
+    ),
   ].join("\n");
 }

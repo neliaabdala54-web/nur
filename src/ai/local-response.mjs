@@ -96,7 +96,7 @@ function currentSearchContext(currentInfo, dynamicInformation) {
   return [
     "",
     currentInfo?.searchFailed
-      ? "A pesquisa externa falhou, por isso não consegui validar informação atual."
+      ? currentInfo.searchFailureMessage || "A pesquisa externa falhou, por isso não consegui validar informação atual."
       : currentInfo?.sources?.length
       ? "Encontrei referências sem data de publicação recente confirmável; não posso apresentá-las como informação atual."
       : "Não encontrei uma fonte atual suficientemente verificável para confirmar esta informação dinâmica.",

@@ -1,5 +1,9 @@
 import { getConversationMemory, getRelevantUserMemory } from "./conversation-memory.mjs";
-import { formatCurrentInformation, searchCurrentInformation } from "./current-information.mjs";
+import {
+  formatCurrentInformation,
+  formatCurrentSearchFailure,
+  searchCurrentInformation,
+} from "./current-information.mjs";
 import { getBusinessContext } from "./business.mjs";
 import {
   getTourismClarification,
@@ -190,17 +194,26 @@ export async function generateReply(text, history = [], {
     && ["other-locality", "inhambane-city", "inhambane-province", "mozambique"].includes(intent.tourism.geography.scope);
   const shouldSearchCurrentInformation = intent.needsCurrentInformation
     || tourismOutsideMaxixe;
-  if (shouldSearchCurrentInformation && environment.SEARCH_API_KEY
-    && !["ambiguous", "ambiguous-inhambane"].includes(search.locality)) {
+  if (shouldSearchCurrentInformation && hasAiApiKey(environment)
+    && (
+      intent.category === "mozambique"
+      || !["ambiguous", "ambiguous-inhambane"].includes(search.locality)
+    )) {
     try {
       currentInfo = await searchCurrentInformation(text, {
-        apiKey: environment.SEARCH_API_KEY,
-        apiUrl: environment.SEARCH_API_URL,
+        environment,
         fetchImpl,
       });
     } catch (error) {
-      console.warn(`[bot-nur] Pesquisa atual indisponível: ${error.message}`);
+      const providerType = typeof error.providerType === "string"
+        && /^[A-Z0-9_.-]{1,60}$/i.test(error.providerType)
+        ? error.providerType
+        : "sem tipo de fornecedor";
+      console.warn(
+        `[bot-nur] Google Search Grounding indisponível (${error.name}; HTTP ${error.status || "n/a"}; ${providerType}).`,
+      );
       currentInfo.searchFailed = true;
+      currentInfo.searchFailureMessage = formatCurrentSearchFailure(error.status);
     }
   }
   const reliability = assessReliability({

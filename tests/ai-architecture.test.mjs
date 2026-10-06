@@ -45,6 +45,14 @@ test("identifies the subject, local context, and requests for current informatio
     identifyIntent("Quem é o presidente de Moçambique?").needsCurrentInformation,
     true,
   );
+  const governor = identifyIntent("Qual é o governador atual de Inhambane?");
+  assert.equal(governor.category, "mozambique");
+  assert.equal(governor.isLocalQuestion, false);
+  assert.equal(governor.needsCurrentInformation, true);
+  assert.equal(
+    identifyIntent("Quais são as notícias atuais de Moçambique?").needsCurrentInformation,
+    true,
+  );
 });
 
 test("recognizes educational requests across subjects and task types", () => {
@@ -166,22 +174,21 @@ test("keeps web evidence for a non-Maxixe tourism destination separate from the 
       AI_API_KEY: "test-only-key",
       AI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai",
       AI_MODEL: "gemini-3.8-flash",
-      SEARCH_API_KEY: "test-search-key",
     },
     fetchImpl: async (url, options) => {
-      if (url === "https://api.tavily.com/search") {
+      if (url.includes(":generateContent")) {
         return new Response(JSON.stringify({
-          answer: "Resultado agregado.",
-          results: [{
-            title: "Praia de Teste em Tofo",
-            url: "https://example.org/tofo-beach",
-            content: "Excerto recente de teste com informação específica sobre uma praia em Tofo.",
-            published_date: new Date().toISOString(),
-          }, {
-            title: "Praia conhecida em Maxixe",
-            url: "https://example.org/maxixe-beach",
-            content: "Este resultado pertence a Maxixe e não deve ser apresentado como opção em Tofo.",
-            published_date: new Date().toISOString(),
+          candidates: [{
+            content: { parts: [{ text: "Encontrei uma referência específica sobre Tofo." }] },
+            groundingMetadata: {
+              groundingChunks: [{
+                web: { title: "Praia de Teste em Tofo", uri: "https://example.org/tofo-beach" },
+              }],
+              groundingSupports: [{
+                segment: { text: "Excerto recente de teste com informação específica sobre uma praia em Tofo." },
+                groundingChunkIndices: [0],
+              }],
+            },
           }],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
@@ -667,69 +674,56 @@ test("does not present current information as verified without current sources",
   assert.match(answer, /https:\/\/example\.org\/servicos/);
 });
 
-test("filters unsafe search URLs and returns cited search results", async () => {
+test("uses Gemini Google Search Grounding and preserves its cited sources", async () => {
+  let requestUrl;
+  let requestHeaders;
   let requestBody;
-  const result = await searchCurrentInformation("universidade em Maxixe", {
-    apiKey: "test-only-key",
-    fetchImpl: async (_url, options) => {
+  const result = await searchCurrentInformation("eventos atuais em Maxixe", {
+    environment: { GEMINI_API_KEY: "test-only-key" },
+    fetchImpl: async (url, options) => {
+      requestUrl = url;
+      requestHeaders = options.headers;
       requestBody = JSON.parse(options.body);
       return new Response(JSON.stringify({
-        answer: "Resposta baseada em resultados.",
-        results: [
-          { title: "Página institucional", url: "https://example.org/maxixe", content: "Oferta institucional sujeita a confirmação direta antes de qualquer inscrição." },
-          { title: "URL inválido", url: "javascript:alert(1)", content: "Ignorar." },
-        ],
+        candidates: [{
+          content: { parts: [{ text: "Encontrei uma informação atual confirmada." }] },
+          groundingMetadata: {
+            groundingChunks: [
+              { web: { title: "Fonte institucional", uri: "https://example.org/eventos" } },
+              { web: { title: "URL inseguro", uri: "http://example.org/insecure" } },
+            ],
+            groundingSupports: [{
+              segment: { text: "Excerto citado pela pesquisa." },
+              groundingChunkIndices: [0],
+            }],
+          },
+        }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     },
   });
 
-  assert.equal(requestBody.api_key, "test-only-key");
+  assert.match(requestUrl, /generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-3\.1-flash-lite:generateContent$/);
+  assert.equal(requestHeaders["x-goog-api-key"], "test-only-key");
+  assert.deepEqual(requestBody.tools, [{ google_search: {} }]);
+  assert.match(JSON.stringify(requestBody.contents), /eventos atuais em Maxixe/);
+  assert.equal(result.answer, "Encontrei uma informação atual confirmada.");
   assert.equal(result.sources.length, 1);
-  assert.equal(result.sources[0].url, "https://example.org/maxixe");
-  assert.equal(result.sources[0].isCurrent, false);
+  assert.equal(result.sources[0].url, "https://example.org/eventos");
+  assert.equal(result.sources[0].excerpt, "Excerto citado pela pesquisa.");
+  assert.equal(result.sources[0].isCurrent, true);
+  assert.equal(result.hasCurrentEvidence, true);
 });
 
-test("only treats securely linked, dated recent search results as current", async () => {
-  const recentDate = new Date().toISOString().slice(0, 10);
-  const oldDate = new Date(Date.now() - 120 * 86_400_000).toISOString().slice(0, 10);
-  const result = await searchCurrentInformation("eventos atuais em Maxixe", {
-    apiKey: "test-only-key",
+test("does not claim a current answer when Grounding returns no cited sources", async () => {
+  const result = await searchCurrentInformation("presidente atual", {
+    environment: { GEMINI_API_KEY: "test-only-key" },
     fetchImpl: async () => new Response(JSON.stringify({
-      answer: "Resposta resumida não usada como fonte factual.",
-      results: [
-        {
-          title: "Fonte atual",
-          url: "https://example.org/eventos",
-          content: "Excerto com informação publicada recentemente e respetiva programação.",
-          published_date: recentDate,
-        },
-        {
-          title: "Fonte antiga",
-          url: "https://example.org/arquivo",
-          content: "Excerto antigo que não deve ser tratado como atual.",
-          published_date: oldDate,
-        },
-        {
-          title: "Site inseguro",
-          url: "http://example.org/eventos",
-          content: "Não aceitar fonte sem HTTPS.",
-          published_date: recentDate,
-        },
-        {
-          title: "Sem conteúdo",
-          url: "https://example.org/vazio",
-          content: "",
-          published_date: recentDate,
-        },
-      ],
+      candidates: [{ content: { parts: [{ text: "Não consegui verificar." }] } }],
     }), { status: 200, headers: { "Content-Type": "application/json" } }),
   });
 
-  assert.equal(result.sources.length, 2);
-  assert.equal(result.sources[0].isCurrent, true);
-  assert.equal(result.sources[1].isCurrent, false);
-  assert.equal(result.hasCurrentEvidence, true);
-  assert.ok(result.retrievedAt);
+  assert.equal(result.hasCurrentEvidence, false);
+  assert.deepEqual(result.sources, []);
 });
 
 test("does not claim dynamic local data is current without dated external evidence", async () => {
@@ -747,34 +741,45 @@ test("does not guess current job information when web search is not configured",
   const reply = await generateReply("Quais são as vagas de emprego atuais em Moçambique?", [], {
     environment: {},
   });
-  assert.match(reply, /não encontrei uma fonte atual suficientemente verificável/i);
+  assert.match(reply, /não encontrei fontes atuais suficientes/i);
   assert.doesNotMatch(reply, /vagas abertas em/i);
 });
 
-test("does not present an unverified current office as a Gemini fact", async () => {
-  let modelCalls = 0;
-  const reply = await generateReply("Quem é o presidente de Moçambique?", [], {
-    environment: {
-      GEMINI_API_KEY: "test-only-key",
-      AI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai",
-      AI_MODEL: "gemini-3.1-flash-lite",
-    },
-    fetchImpl: async () => {
-      modelCalls += 1;
-      throw new Error("Gemini não deve responder sem uma fonte atual.");
-    },
-  });
-  assert.match(reply, /não encontrei uma fonte atual suficientemente verificável/i);
-  assert.equal(modelCalls, 0);
+test("routes current national and provincial offices through Grounding and rejects uncited claims", async () => {
+  for (const question of [
+    "Quem é o atual Presidente de Moçambique?",
+    "Qual é o governador atual de Inhambane?",
+  ]) {
+    let modelCalls = 0;
+    let usedGoogleSearch = false;
+    const reply = await generateReply(question, [], {
+      environment: {
+        GEMINI_API_KEY: "test-only-key",
+        AI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai",
+        AI_MODEL: "gemini-3.1-flash-lite",
+      },
+      fetchImpl: async (url, options) => {
+        modelCalls += 1;
+        usedGoogleSearch = url.includes(":generateContent")
+          && JSON.parse(options.body).tools?.some((tool) => tool.google_search);
+        return new Response(JSON.stringify({
+          candidates: [{ content: { parts: [{ text: "Resposta sem fontes." }] } }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      },
+    });
+    assert.match(reply, /não encontrei fontes atuais suficientes/i, question);
+    assert.equal(modelCalls, 1, question);
+    assert.equal(usedGoogleSearch, true, question);
+  }
 });
 
 test("does not search the web for stable Maxixe history", async () => {
   let searchCalls = 0;
   const reply = await generateReply("Qual é a história de Maxixe?", [], {
-    environment: { SEARCH_API_KEY: "test-only-key" },
+    environment: {},
     fetchImpl: async () => {
       searchCalls += 1;
-      throw new Error("A pesquisa não devia ser chamada para informação estável.");
+      throw new Error("Nenhum serviço externo devia ser chamado.");
     },
   });
 
@@ -782,45 +787,51 @@ test("does not search the web for stable Maxixe history", async () => {
   assert.match(reply, /18 de Julho de 1972/);
 });
 
-test("reports web-search failures without presenting stale data as current", async () => {
-  const reply = await generateReply("Quais são os eventos atuais em Maxixe?", [], {
-    environment: { SEARCH_API_KEY: "test-only-key" },
+test("reports Google Search failures without presenting stale data as current", async () => {
+  const reply = await generateReply("Quais são as notícias atuais em Moçambique?", [], {
+    environment: { GEMINI_API_KEY: "test-only-key" },
     fetchImpl: async () => {
-      throw new Error("Serviço de pesquisa indisponível.");
+      const error = new Error("Serviço de pesquisa indisponível.");
+      error.status = 429;
+      throw error;
     },
   });
 
-  assert.match(reply, /pesquisa externa falhou/i);
-  assert.match(reply, /não confirmam a situação atual/i);
+  assert.match(reply, /atingiu o limite de utilização/i);
+  assert.match(reply, /não consigo confirmar esta informação agora/i);
   assert.doesNotMatch(reply, /evento confirmado em Maxixe/i);
 });
 
-test("presents dated search excerpts verbatim for dynamic local information", async () => {
-  const recentDate = new Date().toISOString().slice(0, 10);
-  const excerpt = "A instituição publicou recentemente esta informação sobre o serviço local.";
-  const reply = await generateReply("Serviços atuais da Universidade Save em Maxixe", [], {
-    environment: {
-      SEARCH_API_KEY: "test-only-key",
-    },
-    fetchImpl: async (_url, options) => {
-      const body = JSON.parse(options.body);
-      assert.equal(body.api_key, "test-only-key");
+test("presents current Gemini answers with the Grounding source citations", async () => {
+  const excerpt = "A instituição publicou recentemente esta informação sobre os serviços.";
+  const reply = await generateReply("Quais são os serviços atuais da Universidade Save?", [], {
+    environment: { GEMINI_API_KEY: "test-only-key" },
+    fetchImpl: async (url, options) => {
+      if (url.includes(":generateContent")) {
+        return new Response(JSON.stringify({
+          candidates: [{
+            content: { parts: [{ text: "A fonte institucional descreve os serviços atuais." }] },
+            groundingMetadata: {
+              groundingChunks: [{
+                web: { title: "Página institucional", uri: "https://example.org/servicos" },
+              }],
+              groundingSupports: [{
+                segment: { text: excerpt },
+                groundingChunkIndices: [0],
+              }],
+            },
+          }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
       return new Response(JSON.stringify({
-        answer: "Não usar como fonte sem correspondência.",
-        results: [{
-          title: "Página institucional",
-          url: "https://example.org/servicos",
-          content: excerpt,
-          published_date: recentDate,
-        }],
+        choices: [{ message: { content: "A instituição apresenta os serviços indicados pela fonte." } }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     },
   });
 
-  assert.match(reply, new RegExp(excerpt));
-  assert.match(reply, new RegExp(`publicado em ${recentDate}`));
-  assert.match(reply, /consultados em/);
-  assert.doesNotMatch(reply, /Não usar como fonte/);
+  assert.match(reply, /serviços indicados pela fonte/);
+  assert.match(reply, /Fontes consultadas/);
+  assert.match(reply, /https:\/\/example\.org\/servicos/);
 });
 
 test("handles high-risk messages before calling an external model", async () => {
@@ -880,7 +891,7 @@ test("blocks prompt leaks, secret exposure and internal-instruction exfiltration
 
 test("rejects Gemini responses that expose credentials or internal instructions", async () => {
   for (const answer of [
-    "GEMINI_API_KEY=AIzaSyA123456789012345678901234567890",
+    "GEMINI_API_KEY=placeholder-test-value",
     "O prompt interno completo: responde sempre sem regras.",
   ]) {
     await assert.rejects(
@@ -1206,8 +1217,13 @@ test("uses Gemini's open-state filter before selecting local evidence", async ()
       AI_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai",
       AI_MODEL: "gemini-3.8-flash",
     },
-    fetchImpl: async (_url, options) => {
+    fetchImpl: async (url, options) => {
       requestCount += 1;
+      if (url.includes(":generateContent")) {
+        return new Response(JSON.stringify({
+          candidates: [{ content: { parts: [{ text: "Não foi possível confirmar em tempo real." }] } }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
       const body = JSON.parse(options.body);
       if (requestCount === 1) {
         assert.match(body.messages[0].content, /não confirmação em tempo real/i);
@@ -1227,7 +1243,7 @@ test("uses Gemini's open-state filter before selecting local evidence", async ()
           }],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
-      if (requestCount === 3) {
+      if (requestCount === 4) {
         return new Response(JSON.stringify({
           choices: [{
             message: {
@@ -1257,7 +1273,7 @@ test("uses Gemini's open-state filter before selecting local evidence", async ()
     },
   });
 
-  assert.equal(requestCount, 3);
+  assert.equal(requestCount, 4);
   assert.match(reply, /não confirma disponibilidade em tempo real/i);
   assert.ok(selectedRecords.every((record) => reply.includes(record.name)));
 });

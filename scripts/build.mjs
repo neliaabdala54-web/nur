@@ -1,4 +1,4 @@
-import { rm, mkdir, cp, writeFile, stat } from "node:fs/promises";
+import { rm, mkdir, cp, writeFile, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,7 +16,18 @@ async function build() {
   // 2. Copiar ficheiros estáticos de public para dist
   await cp(publicDir, distDir, { recursive: true });
 
-  // 3. Criar .nojekyll para evitar processamento pelo GitHub Pages Jekyll
+  // 3. Injetar BOT_NUR_API_BASE se configurado no ambiente de build
+  const apiBase = (process.env.BOT_NUR_API_BASE || process.env.BACKEND_URL || "").trim().replace(/\/+$/, "");
+  if (apiBase) {
+    console.log(`A configurar BOT_NUR_API_BASE no build: ${apiBase}`);
+    const indexPath = join(distDir, "index.html");
+    let html = await readFile(indexPath, "utf8");
+    const scriptTag = `<script>window.BOT_NUR_API_BASE = "${apiBase}";</script>\n  `;
+    html = html.replace("<head>", `<head>\n  ${scriptTag}`);
+    await writeFile(indexPath, html, "utf8");
+  }
+
+  // 4. Criar .nojekyll para evitar processamento pelo GitHub Pages Jekyll
   await writeFile(join(distDir, ".nojekyll"), "");
 
   // 4. Verificar ficheiros essenciais gerados

@@ -34,6 +34,8 @@ jobs:
         run: npm test
 
       - name: Build frontend static site
+        env:
+          BOT_NUR_API_BASE: ${{ secrets.BOT_NUR_API_BASE || vars.BOT_NUR_API_BASE }}
         run: npm run build
 
       - name: Upload Pages artifact

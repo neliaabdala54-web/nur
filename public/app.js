@@ -282,12 +282,40 @@ async function convertRecordingToWav(blob, fileName) {
   }
 }
 
+function formatHttpStatusError(status, serverError) {
+  if (serverError) return serverError;
+  switch (status) {
+    case 400:
+      return "O pedido é inválido. Verifica os dados introduzidos.";
+    case 401:
+      return "Sessão não autorizada ou expirada.";
+    case 403:
+      return "Acesso negado pelo servidor.";
+    case 404:
+      return "Endpoint da API não encontrado (404).";
+    case 405:
+      return "Método HTTP não permitido (405). Se estás no GitHub Pages, configura o URL do servidor backend Node.js nas Definições (ex.: https://bot-nur.onrender.com).";
+    case 429:
+      return "Muitos pedidos em pouco tempo. Tenta novamente dentro de instantes.";
+    case 500:
+      return "Erro interno do servidor (500). Tenta novamente mais tarde.";
+    case 502:
+    case 503:
+      return "Servidor backend ou serviço de IA temporariamente indisponível (502/503).";
+    default:
+      return `O pedido não foi concluído (${status}).`;
+  }
+}
+
 function sendMessageWithProgress(path, body) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     activeMessageRequest = xhr;
-    xhr.open("POST", path);
-    xhr.withCredentials = true;
+    const apiBase = getApiBase();
+    const fullUrl = apiBase && path.startsWith("/") ? `${apiBase}${path}` : path;
+    const isCrossOrigin = Boolean(apiBase) && !apiBase.startsWith(window.location.origin);
+    xhr.open("POST", fullUrl);
+    if (isCrossOrigin) xhr.withCredentials = true;
     xhr.setRequestHeader("Content-Type", "application/json");
     xhr.upload.addEventListener("progress", (event) => {
       if (!event.lengthComputable) return;
@@ -307,15 +335,15 @@ function sendMessageWithProgress(path, body) {
         return;
       }
       if (xhr.status < 200 || xhr.status >= 300) {
-        if (xhr.status === 401) await restoreGuestSession();
-        reject(new Error(data.error || `O pedido não foi concluído (${xhr.status}).`));
+        if (xhr.status === 401 && path !== "/api/auth/guest") await restoreGuestSession();
+        reject(new Error(formatHttpStatusError(xhr.status, data.error)));
         return;
       }
       resolve(data);
     });
     xhr.addEventListener("error", () => {
       activeMessageRequest = null;
-      reject(new Error("Falha de rede durante o envio dos ficheiros."));
+      reject(new Error(`Falha de rede ao enviar ficheiros. Verifica se o backend está ativo e o URL do servidor (${apiBase || "mesmo domínio"}).`));
     });
     xhr.addEventListener("abort", () => {
       activeMessageRequest = null;
@@ -342,6 +370,9 @@ const getApiBase = () => {
     const stored = localStorage.getItem("bot_nur_api_base");
     if (stored) return stored.trim().replace(/\/+$/, "");
   } catch {}
+  if (typeof window !== "undefined" && window.location.hostname.endsWith(".github.io")) {
+    return "https://bot-nur-api.onrender.com";
+  }
   return "";
 };
 
@@ -351,17 +382,22 @@ async function api(path, options = {}) {
   const apiBase = getApiBase();
   const fullUrl = apiBase && path.startsWith("/") ? `${apiBase}${path}` : path;
   const isCrossOrigin = Boolean(apiBase) && !apiBase.startsWith(window.location.origin);
-  const response = await fetch(fullUrl, {
-    credentials: isCrossOrigin ? "include" : "same-origin",
-    ...options,
-    headers,
-  });
+  let response;
+  try {
+    response = await fetch(fullUrl, {
+      credentials: isCrossOrigin ? "include" : "same-origin",
+      ...options,
+      headers,
+    });
+  } catch (networkError) {
+    throw new Error(`Não foi possível ligar ao servidor de API (${apiBase || "mesmo domínio"}). Verifica se o backend está a funcionar ou configura o URL nas Definições.`);
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && path !== "/api/session") {
+    if (response.status === 401 && path !== "/api/session" && path !== "/api/auth/guest") {
       await restoreGuestSession();
     }
-    throw new Error(data.error || `O pedido não foi concluído (${response.status}).`);
+    throw new Error(formatHttpStatusError(response.status, data.error));
   }
   return data;
 }
@@ -578,6 +614,16 @@ async function sendMessage(value, files = selectedFiles) {
   const plainContent = value.trim();
   const content = plainContent || (files.length ? "Analisa o conteúdo do(s) ficheiro(s) anexado(s)." : "");
   if ((!content && !files.length) || isSending) return;
+
+  if (!getApiBase() && typeof window !== "undefined" && window.location.hostname.endsWith(".github.io")) {
+    showToast("Configura o URL do servidor backend nas Definições para conversar no GitHub Pages.");
+    addMessage({
+      role: "assistant",
+      content: "O site está a ser executado no GitHub Pages (servidor estático). Para o chat funcionar em produção, abre as Definições (ícone ⚙️ no menu) e insere o URL do teu servidor backend Node.js (ex.: https://bot-nur.onrender.com).",
+      isError: true,
+    });
+    return;
+  }
 
   isSending = true;
   elements.sendButton.disabled = true;

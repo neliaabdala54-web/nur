@@ -284,3 +284,29 @@ test("keeps conversations private, validates messages and deletes history", asyn
   });
   assert.equal(deletedHistory.response.status, 404);
 });
+
+test("handles CORS preflight OPTIONS requests and sets credentials headers", async () => {
+  const preflight = await fetch(`${baseUrl}/api/conversations/sample/messages`, {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://neliaabdala54-web.github.io",
+      "Access-Control-Request-Method": "POST",
+    },
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), "https://neliaabdala54-web.github.io");
+  assert.equal(preflight.headers.get("access-control-allow-credentials"), "true");
+  assert.match(preflight.headers.get("access-control-allow-methods"), /POST/);
+
+  const guest = await fetch(`${baseUrl}/api/auth/guest`, {
+    method: "POST",
+    headers: {
+      Origin: "https://neliaabdala54-web.github.io",
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  });
+  assert.equal(guest.status, 201);
+  assert.equal(guest.headers.get("access-control-allow-origin"), "https://neliaabdala54-web.github.io");
+  assert.equal(guest.headers.get("access-control-allow-credentials"), "true");
+});

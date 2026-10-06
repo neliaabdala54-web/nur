@@ -154,21 +154,30 @@ function tokenHash(token) {
 }
 
 function sessionCookie(request, token) {
-  const secure = process.env.NODE_ENV === "production" || Boolean(request.socket.encrypted);
-  return `nur_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_AGE}${secure ? "; Secure" : ""}`;
+  const secure = process.env.NODE_ENV === "production" || Boolean(request.socket.encrypted) || Boolean(request.headers["x-forwarded-proto"] === "https");
+  const isCrossOrigin = Boolean(request.headers.origin && !request.headers.origin.includes(request.headers.host || ""));
+  const sameSite = isCrossOrigin ? "None" : "Lax";
+  return `nur_session=${token}; HttpOnly; SameSite=${sameSite}; Path=/; Max-Age=${SESSION_AGE}${secure || isCrossOrigin ? "; Secure" : ""}`;
 }
 
 function clearSessionCookie(request) {
-  const secure = process.env.NODE_ENV === "production" || Boolean(request.socket.encrypted);
-  return `nur_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure ? "; Secure" : ""}`;
+  const secure = process.env.NODE_ENV === "production" || Boolean(request.socket.encrypted) || Boolean(request.headers["x-forwarded-proto"] === "https");
+  const isCrossOrigin = Boolean(request.headers.origin && !request.headers.origin.includes(request.headers.host || ""));
+  const sameSite = isCrossOrigin ? "None" : "Lax";
+  return `nur_session=; HttpOnly; SameSite=${sameSite}; Path=/; Max-Age=0${secure || isCrossOrigin ? "; Secure" : ""}`;
 }
 
 function getSessionUser(request, database) {
-  const token = request.headers.cookie
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith("nur_session="))
-    ?.slice("nur_session=".length);
+  let token = request.headers.authorization?.startsWith("Bearer ")
+    ? request.headers.authorization.slice(7).trim()
+    : null;
+  if (!token) {
+    token = request.headers.cookie
+      ?.split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith("nur_session="))
+      ?.slice("nur_session=".length);
+  }
   if (!token) return null;
   return database.prepare(`
     SELECT users.id, users.name, users.email
@@ -183,6 +192,7 @@ function beginSession(response, request, database, userId) {
     "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
   ).run(tokenHash(token), userId, Math.floor(Date.now() / 1000) + SESSION_AGE);
   response.setHeader("Set-Cookie", sessionCookie(request, token));
+  return token;
 }
 
 function requireAccount(user) {
@@ -311,6 +321,22 @@ export function createAppServer({ dataDir, generateReplyImpl = generateReply } =
       const url = new URL(request.url, "http://localhost");
       const path = url.pathname;
       const method = request.method;
+
+      const origin = request.headers.origin;
+      if (origin) {
+        response.setHeader("Access-Control-Allow-Origin", origin);
+        response.setHeader("Access-Control-Allow-Credentials", "true");
+        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+        response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Cookie");
+        response.setHeader("Access-Control-Max-Age", "86400");
+        response.setHeader("Vary", "Origin");
+      }
+
+      if (method === "OPTIONS") {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
 
       if (path === "/health" && method === "GET") {
         sendJson(response, 200, { status: "ok" });
